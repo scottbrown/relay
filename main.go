@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed config.template.yml
+var configTemplate string
 
 type Config struct {
 	ListenPort    string        `yaml:"listen_port"`
@@ -44,6 +48,14 @@ type LogBatch struct {
 }
 
 func main() {
+	var showTemplate bool
+	flag.BoolVar(&showTemplate, "t", false, "Output configuration template and exit")
+	
+	if len(os.Args) > 1 && (os.Args[1] == "-t" || os.Args[1] == "--t") {
+		fmt.Print(configTemplate)
+		os.Exit(0)
+	}
+	
 	config, err := loadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
