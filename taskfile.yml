@@ -5,3 +5,13 @@ tasks:
   build:
     cmds:
       - go build -o .build/relay github.com/scottbrown/relay
+
+  test:
+    cmds:
+      - go test -v ./...
+
+  coverage:
+    cmds:
+      - go test -v -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out
+      - go tool cover -html=coverage.out -o coverage.html
