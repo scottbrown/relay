@@ -1,3 +1,5 @@
+![logo](relay.logo.small.png)
+
 # Relay
 
 A high-performance TCP relay service that receives Zscaler ZPA LSS (Log Streaming Service) data and forwards it to Splunk HEC (HTTP Event Collector). The application acts as an efficient middleware layer that batches log events for optimized delivery to Splunk.
