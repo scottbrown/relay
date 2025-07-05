@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scottbrown/relay/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
 func TestConfig_Defaults(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		ListenPort:   "9514",
 		SourceType:   "zscaler:zpa:lss",
 		Index:        "main",
@@ -44,13 +45,13 @@ func TestConfig_Defaults(t *testing.T) {
 func TestConfig_Validation(t *testing.T) {
 	tests := []struct {
 		name      string
-		config    *Config
+		config    *config.Config
 		expectErr bool
 		errMsg    string
 	}{
 		{
 			name: "missing splunk_hec_url",
-			config: &Config{
+			config: &config.Config{
 				SplunkToken: "test-token",
 			},
 			expectErr: true,
@@ -58,7 +59,7 @@ func TestConfig_Validation(t *testing.T) {
 		},
 		{
 			name: "missing splunk_token",
-			config: &Config{
+			config: &config.Config{
 				SplunkHECURL: "https://example.com",
 			},
 			expectErr: true,
@@ -66,7 +67,7 @@ func TestConfig_Validation(t *testing.T) {
 		},
 		{
 			name: "valid config",
-			config: &Config{
+			config: &config.Config{
 				SplunkHECURL: "https://example.com",
 				SplunkToken:  "test-token",
 			},
@@ -93,7 +94,7 @@ func TestConfig_Validation(t *testing.T) {
 	}
 }
 
-func validateConfig(config *Config) error {
+func validateConfig(config *config.Config) error {
 	if config.SplunkHECURL == "" {
 		return errors.New("splunk_hec_url is required in config file")
 	}
@@ -102,7 +103,6 @@ func validateConfig(config *Config) error {
 	}
 	return nil
 }
-
 
 func TestSplunkEvent_JSONMarshaling(t *testing.T) {
 	event := SplunkEvent{
@@ -136,7 +136,7 @@ func TestSplunkEvent_JSONMarshaling(t *testing.T) {
 }
 
 func TestNewBatchProcessor(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
@@ -162,7 +162,7 @@ func TestNewBatchProcessor(t *testing.T) {
 }
 
 func TestBatchProcessor_AddEvent(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
@@ -224,7 +224,7 @@ func TestBatchProcessor_SendToSplunk(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: server.URL,
 		SplunkToken:  "test-token",
 		BatchSize:    10,
@@ -262,7 +262,7 @@ func TestBatchProcessor_SendToSplunk_Error(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: server.URL,
 		SplunkToken:  "test-token",
 		BatchSize:    10,
@@ -290,10 +290,10 @@ func TestBatchProcessor_SendToSplunk_Error(t *testing.T) {
 }
 
 func TestHandleConnection_ValidJSON(t *testing.T) {
-	config := &Config{
-		SourceType: "test:type",
-		Index:      "test-index",
-		BatchSize:  10,
+	config := &config.Config{
+		SourceType:   "test:type",
+		Index:        "test-index",
+		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
 	httpClient := &http.Client{}
@@ -338,10 +338,10 @@ func TestHandleConnection_ValidJSON(t *testing.T) {
 }
 
 func TestHandleConnection_InvalidJSON(t *testing.T) {
-	config := &Config{
-		SourceType: "test:type",
-		Index:      "test-index",
-		BatchSize:  10,
+	config := &config.Config{
+		SourceType:   "test:type",
+		Index:        "test-index",
+		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
 	httpClient := &http.Client{}
@@ -380,10 +380,10 @@ func TestHandleConnection_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleConnection_EmptyLines(t *testing.T) {
-	config := &Config{
-		SourceType: "test:type",
-		Index:      "test-index",
-		BatchSize:  10,
+	config := &config.Config{
+		SourceType:   "test:type",
+		Index:        "test-index",
+		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
 	httpClient := &http.Client{}
@@ -427,7 +427,7 @@ done:
 }
 
 func TestBatchProcessor_FlushBatch_EmptyBatch(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
@@ -439,7 +439,7 @@ func TestBatchProcessor_FlushBatch_EmptyBatch(t *testing.T) {
 }
 
 func TestBatchProcessor_AddToBatch_TimerBehavior(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    10,
 		BatchTimeout: 100 * time.Millisecond,
 	}
@@ -468,7 +468,7 @@ func TestBatchProcessor_AddToBatch_TimerBehavior(t *testing.T) {
 }
 
 func TestBatchProcessor_AddToBatch_BatchSizeLimit(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    2, // Small batch size for testing
 		BatchTimeout: 5 * time.Second,
 	}
@@ -503,13 +503,13 @@ func TestBatchProcessor_AddToBatch_BatchSizeLimit(t *testing.T) {
 }
 
 func TestConfigTemplate(t *testing.T) {
-	if configTemplate == "" {
+	if config.GetTemplate() == "" {
 		t.Error("configTemplate should not be empty")
 	}
 }
 
 func TestBatchProcessor_StartStop(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
@@ -526,18 +526,18 @@ func TestBatchProcessor_StartStop(t *testing.T) {
 		Source: "test-source",
 		Event:  "test event",
 	}
-	
+
 	bp.AddEvent(event)
-	
+
 	// Give time for processing
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Stop processor
 	bp.Stop()
 }
 
 func TestBatchProcessor_ChannelFull(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
@@ -567,13 +567,13 @@ func TestBatchProcessor_FlushOnTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: server.URL,
 		SplunkToken:  "test-token",
 		BatchSize:    100,
 		BatchTimeout: 50 * time.Millisecond,
 	}
-	
+
 	httpClient := &http.Client{}
 	bp := NewBatchProcessor(config, httpClient)
 
@@ -584,9 +584,9 @@ func TestBatchProcessor_FlushOnTimeout(t *testing.T) {
 		Source: "test-source",
 		Event:  "test event",
 	}
-	
+
 	bp.addToBatch(event)
-	
+
 	// Wait for the flush to complete
 	select {
 	case <-batchFlushed:
@@ -597,7 +597,7 @@ func TestBatchProcessor_FlushOnTimeout(t *testing.T) {
 }
 
 func TestSendToSplunk_InvalidURL(t *testing.T) {
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: "invalid-url",
 		SplunkToken:  "test-token",
 		BatchSize:    10,
@@ -627,7 +627,7 @@ func TestSendToSplunk_MarshalError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: server.URL,
 		SplunkToken:  "test-token",
 		BatchSize:    10,
@@ -659,7 +659,7 @@ func TestSendToSplunk_MarshalError(t *testing.T) {
 func TestParseFlags_MissingRequired(t *testing.T) {
 	// Test parseFlags function - we can't call it directly due to os.Exit
 	// but we can test the logic by creating a config with missing fields
-	config := &Config{
+	config := &config.Config{
 		ListenPort:   "9514",
 		SourceType:   "zscaler:zpa:lss",
 		Index:        "main",
@@ -674,7 +674,7 @@ func TestParseFlags_MissingRequired(t *testing.T) {
 			// Expected behavior: function would print usage and exit
 		}
 		if config.SplunkToken == "" {
-			// Expected behavior: function would print usage and exit  
+			// Expected behavior: function would print usage and exit
 		}
 	}
 }
@@ -687,13 +687,13 @@ func TestHTTPRequestTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: server.URL,
 		SplunkToken:  "test-token",
 		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
-	
+
 	// Use a very short timeout to test timeout handling
 	httpClient := &http.Client{
 		Timeout: 1 * time.Millisecond,
@@ -733,10 +733,10 @@ func TestLogBatch_Structure(t *testing.T) {
 }
 
 func TestHandleConnection_ScannerError(t *testing.T) {
-	config := &Config{
-		SourceType: "test:type",
-		Index:      "test-index",
-		BatchSize:  10,
+	config := &config.Config{
+		SourceType:   "test:type",
+		Index:        "test-index",
+		BatchSize:    10,
 		BatchTimeout: 5 * time.Second,
 	}
 	httpClient := &http.Client{}
@@ -755,7 +755,7 @@ func TestHandleConnection_ScannerError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to write test data: %v", err)
 	}
-	
+
 	// Close the client side to trigger an error
 	client.Close()
 
@@ -770,7 +770,7 @@ func TestSendToSplunk_ResponseBodyRead(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := &Config{
+	config := &config.Config{
 		SplunkHECURL: server.URL,
 		SplunkToken:  "test-token",
 		BatchSize:    10,
@@ -830,7 +830,7 @@ batch_timeout: 10s
 		t.Fatalf("Failed to read config file: %v", err)
 	}
 
-	config := &Config{
+	config := &config.Config{
 		ListenPort:   "9514",
 		SourceType:   "zscaler:zpa:lss",
 		Index:        "main",
@@ -856,12 +856,12 @@ func TestConfigValidation_Integration(t *testing.T) {
 	// Test the validation logic that would be in loadConfig
 	tests := []struct {
 		name   string
-		config *Config
+		config *config.Config
 		valid  bool
 	}{
 		{
 			name: "valid config",
-			config: &Config{
+			config: &config.Config{
 				SplunkHECURL: "https://example.com",
 				SplunkToken:  "token123",
 			},
@@ -869,14 +869,14 @@ func TestConfigValidation_Integration(t *testing.T) {
 		},
 		{
 			name: "missing URL",
-			config: &Config{
+			config: &config.Config{
 				SplunkToken: "token123",
 			},
 			valid: false,
 		},
 		{
 			name: "missing token",
-			config: &Config{
+			config: &config.Config{
 				SplunkHECURL: "https://example.com",
 			},
 			valid: false,
@@ -903,15 +903,15 @@ func TestConfigValidation_Integration(t *testing.T) {
 
 func TestMainTemplateFlag(t *testing.T) {
 	// Test the template flag behavior by checking configTemplate is not empty
-	if configTemplate == "" {
+	if config.GetTemplate() == "" {
 		t.Error("configTemplate should be embedded and not empty")
 	}
-	
+
 	// Test that it looks like YAML content
-	if !strings.Contains(configTemplate, "listen_port") {
+	if !strings.Contains(config.GetTemplate(), "listen_port") {
 		t.Error("configTemplate should contain 'listen_port' field")
 	}
-	if !strings.Contains(configTemplate, "splunk_hec_url") {
+	if !strings.Contains(config.GetTemplate(), "splunk_hec_url") {
 		t.Error("configTemplate should contain 'splunk_hec_url' field")
 	}
 }

@@ -17,21 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/scottbrown/relay/internal/config"
 )
-
-//go:embed config.template.yml
-var configTemplate string
-
-type Config struct {
-	ListenPort    string        `yaml:"listen_port"`
-	SplunkHECURL  string        `yaml:"splunk_hec_url"`
-	SplunkToken   string        `yaml:"splunk_token"`
-	SourceType    string        `yaml:"source_type"`
-	Index         string        `yaml:"index"`
-	BatchSize     int           `yaml:"batch_size"`
-	BatchTimeout  time.Duration `yaml:"batch_timeout"`
-}
 
 type SplunkEvent struct {
 	Time       int64       `json:"time"`
@@ -50,20 +37,20 @@ type LogBatch struct {
 func main() {
 	var showTemplate bool
 	flag.BoolVar(&showTemplate, "t", false, "Output configuration template and exit")
-	
+
 	if len(os.Args) > 1 && (os.Args[1] == "-t" || os.Args[1] == "--t") {
-		fmt.Print(configTemplate)
+		fmt.Print(config.GetTemplate())
 		os.Exit(0)
 	}
-	
-	config, err := loadConfig()
+
+	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
-	
+
 	log.Printf("Starting Relay - ZPA LSS to Splunk HEC")
-	log.Printf("Listening on port: %s", config.ListenPort)
-	log.Printf("Forwarding to Splunk HEC: %s", config.SplunkHECURL)
+	log.Printf("Listening on port: %s", cfg.ListenPort)
+	log.Printf("Forwarding to Splunk HEC: %s", cfg.SplunkHECURL)
 
 	// Create HTTP client for Splunk HEC
 	httpClient := &http.Client{
@@ -71,11 +58,11 @@ func main() {
 	}
 
 	// Create batch processor
-	batchProcessor := NewBatchProcessor(config, httpClient)
+	batchProcessor := NewBatchProcessor(cfg, httpClient)
 	go batchProcessor.Start()
 
 	// Start TCP server
-	listener, err := net.Listen("tcp", ":"+config.ListenPort)
+	listener, err := net.Listen("tcp", ":"+cfg.ListenPort)
 	if err != nil {
 		log.Fatalf("Failed to start listener: %v", err)
 	}
@@ -101,66 +88,24 @@ func main() {
 			continue
 		}
 
-		go handleConnection(conn, config, batchProcessor)
+		go handleConnection(conn, cfg, batchProcessor)
 	}
 }
 
-func loadConfig() (*Config, error) {
-	var configFile string
-	flag.StringVar(&configFile, "f", "/etc/relay/config.yml", "Path to configuration file")
+func parseFlags() *config.Config {
+	cfg := &config.Config{}
+
+	flag.StringVar(&cfg.ListenPort, "port", "9514", "Port to listen on")
+	flag.StringVar(&cfg.SplunkHECURL, "hec-url", "", "Splunk HEC URL (required)")
+	flag.StringVar(&cfg.SplunkToken, "token", "", "Splunk HEC token (required)")
+	flag.StringVar(&cfg.SourceType, "sourcetype", "zscaler:zpa:lss", "Splunk sourcetype")
+	flag.StringVar(&cfg.Index, "index", "main", "Splunk index")
+	flag.IntVar(&cfg.BatchSize, "batch-size", 100, "Batch size for HEC submissions")
+	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch timeout")
+
 	flag.Parse()
 
-	// Set default values
-	config := &Config{
-		ListenPort:   "9514",
-		SourceType:   "zscaler:zpa:lss",
-		Index:        "main",
-		BatchSize:    100,
-		BatchTimeout: 5 * time.Second,
-	}
-
-	// Check if config file exists
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		return nil, fmt.Errorf("configuration file not found: %s", configFile)
-	}
-
-	// Read config file
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
-	}
-
-	// Parse YAML
-	if err := yaml.Unmarshal(data, config); err != nil {
-		return nil, fmt.Errorf("failed to parse YAML config: %v", err)
-	}
-
-	// Validate required fields
-	if config.SplunkHECURL == "" {
-		return nil, fmt.Errorf("splunk_hec_url is required in config file")
-	}
-	if config.SplunkToken == "" {
-		return nil, fmt.Errorf("splunk_token is required in config file")
-	}
-
-	log.Printf("Loaded configuration from: %s", configFile)
-	return config, nil
-}
-
-func parseFlags() *Config {
-	config := &Config{}
-	
-	flag.StringVar(&config.ListenPort, "port", "9514", "Port to listen on")
-	flag.StringVar(&config.SplunkHECURL, "hec-url", "", "Splunk HEC URL (required)")
-	flag.StringVar(&config.SplunkToken, "token", "", "Splunk HEC token (required)")
-	flag.StringVar(&config.SourceType, "sourcetype", "zscaler:zpa:lss", "Splunk sourcetype")
-	flag.StringVar(&config.Index, "index", "main", "Splunk index")
-	flag.IntVar(&config.BatchSize, "batch-size", 100, "Batch size for HEC submissions")
-	flag.DurationVar(&config.BatchTimeout, "batch-timeout", 5*time.Second, "Batch timeout")
-	
-	flag.Parse()
-
-	if config.SplunkHECURL == "" || config.SplunkToken == "" {
+	if cfg.SplunkHECURL == "" || cfg.SplunkToken == "" {
 		fmt.Println("Usage: relay -hec-url <URL> -token <TOKEN> [options]")
 		fmt.Println("\nRequired:")
 		fmt.Println("  -hec-url    Splunk HEC URL (e.g., https://your-instance.splunkcloud.com:8088/services/collector)")
@@ -174,12 +119,12 @@ func parseFlags() *Config {
 		os.Exit(1)
 	}
 
-	return config
+	return cfg
 }
 
-func handleConnection(conn net.Conn, config *Config, batchProcessor *BatchProcessor) {
+func handleConnection(conn net.Conn, cfg *config.Config, batchProcessor *BatchProcessor) {
 	defer conn.Close()
-	
+
 	clientAddr := conn.RemoteAddr().String()
 	log.Printf("New connection from: %s", clientAddr)
 
@@ -203,8 +148,8 @@ func handleConnection(conn net.Conn, config *Config, batchProcessor *BatchProces
 			Time:       time.Now().Unix(),
 			Host:       clientAddr,
 			Source:     "zpa_lss",
-			SourceType: config.SourceType,
-			Index:      config.Index,
+			SourceType: cfg.SourceType,
+			Index:      cfg.Index,
 			Event:      logData,
 		}
 
@@ -215,24 +160,24 @@ func handleConnection(conn net.Conn, config *Config, batchProcessor *BatchProces
 	if err := scanner.Err(); err != nil {
 		log.Printf("Connection error from %s: %v", clientAddr, err)
 	}
-	
+
 	log.Printf("Connection closed: %s", clientAddr)
 }
 
 type BatchProcessor struct {
-	config     *Config
+	config     *config.Config
 	httpClient *http.Client
 	eventChan  chan SplunkEvent
 	batch      *LogBatch
 	stopChan   chan bool
 }
 
-func NewBatchProcessor(config *Config, httpClient *http.Client) *BatchProcessor {
+func NewBatchProcessor(cfg *config.Config, httpClient *http.Client) *BatchProcessor {
 	return &BatchProcessor{
-		config:     config,
+		config:     cfg,
 		httpClient: httpClient,
 		eventChan:  make(chan SplunkEvent, 1000),
-		batch:      &LogBatch{events: make([]SplunkEvent, 0, config.BatchSize)},
+		batch:      &LogBatch{events: make([]SplunkEvent, 0, cfg.BatchSize)},
 		stopChan:   make(chan bool),
 	}
 }

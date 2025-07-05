@@ -1,0 +1,8 @@
+# Relay Configuration
+listen_port: "9514"
+splunk_hec_url: "https://your-instance.splunkcloud.com:8088/services/collector"
+splunk_token: "your-hec-token-here"
+source_type: "zscaler:zpa:lss"
+index: "zscaler"
+batch_size: 100
+batch_timeout: "5s"
