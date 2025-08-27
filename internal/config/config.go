@@ -2,48 +2,49 @@ package config
 
 import (
 	_ "embed"
-	"flag"
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	DefaultListenPort   string        = "9514"
-	DefaultSourceType   string        = "zscaler:zpa:lss"
-	DefaultIndex        string        = "main"
-	DefaultBatchSize    int           = 100
-	DefaultBatchTimeout time.Duration = 5 * time.Second
+	DefaultListenAddr   string = ":9015"
+	DefaultOutputDir    string = "./zpa-logs"
+	DefaultSourceType   string = "zpa:lss"
+	DefaultMaxLineBytes int    = 1 << 20 // 1 MiB
 )
 
 //go:embed config.template.yml
 var configTemplate string
 
 type Config struct {
-	ListenPort   string        `yaml:"listen_port"`
-	SplunkHECURL string        `yaml:"splunk_hec_url"`
-	SplunkToken  string        `yaml:"splunk_token"`
-	SourceType   string        `yaml:"source_type"`
-	Index        string        `yaml:"index"`
-	BatchSize    int           `yaml:"batch_size"`
-	BatchTimeout time.Duration `yaml:"batch_timeout"`
+	ListenAddr   string `yaml:"listen_addr"`
+	TLSCertFile  string `yaml:"tls_cert_file"`
+	TLSKeyFile   string `yaml:"tls_key_file"`
+	OutputDir    string `yaml:"output_dir"`
+	SplunkHECURL string `yaml:"splunk_hec_url"`
+	SplunkToken  string `yaml:"splunk_token"`
+	SourceType   string `yaml:"source_type"`
+	AllowedCIDRs string `yaml:"allowed_cidrs"`
+	GzipHEC      bool   `yaml:"gzip_hec"`
+	MaxLineBytes int    `yaml:"max_line_bytes"`
 }
 
-func LoadConfig() (*Config, error) {
-	var configFile string
-	flag.StringVar(&configFile, "f", "/etc/relay/config.yml", "Path to configuration file")
-	flag.Parse()
-
+func LoadConfig(configFile string) (*Config, error) {
 	// Set default values
 	config := &Config{
-		ListenPort:   DefaultListenPort,
+		ListenAddr:   DefaultListenAddr,
+		OutputDir:    DefaultOutputDir,
 		SourceType:   DefaultSourceType,
-		Index:        DefaultIndex,
-		BatchSize:    DefaultBatchSize,
-		BatchTimeout: DefaultBatchTimeout,
+		GzipHEC:      true,
+		MaxLineBytes: DefaultMaxLineBytes,
+	}
+
+	// If no config file specified, return defaults
+	if configFile == "" {
+		return config, nil
 	}
 
 	// Check if config file exists
@@ -60,14 +61,6 @@ func LoadConfig() (*Config, error) {
 	// Parse YAML
 	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML config: %v", err)
-	}
-
-	// Validate required fields
-	if config.SplunkHECURL == "" {
-		return nil, fmt.Errorf("splunk_hec_url is required in config file")
-	}
-	if config.SplunkToken == "" {
-		return nil, fmt.Errorf("splunk_token is required in config file")
 	}
 
 	log.Printf("Loaded configuration from: %s", configFile)
