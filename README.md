@@ -1,4 +1,4 @@
-![logo](relay.logo.small.png)
+![logo](relay.logo.large.png)
 
 # Relay
 
