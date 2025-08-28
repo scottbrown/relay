@@ -14,6 +14,38 @@ A high-performance TCP relay service that receives Zscaler ZPA LSS (Log Streamin
 - **Template Generation**: Built-in configuration template generator
 - **Graceful Shutdown**: Handles system signals for clean service termination
 
+## How it Works
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant AC as ZPA App Connector (appliance)
+    participant ZC as Zscaler Cloud
+    participant LSS as ZPA Log Streaming Service
+    participant R as Relay
+    participant FS as Local Storage (NDJSON)
+    participant HEC as Splunk HEC (/services/collector/raw)
+
+    Note over AC,ZC: Operational & audit data flows from App Connector up to Zscaler Cloud
+    AC-->>ZC: Telemetry, audit, user/app metrics (proprietary)
+
+    Note over LSS,R: LSS initiates outbound connection to your receiver
+    LSS-)R: TCP/TLS connect to relay:port
+    activate R
+
+    loop Streaming (long-lived socket)
+      LSS-->>R: NDJSON event "\n" (one JSON object per line)
+      R->>FS: append line to zpa-YYYY-MM-DD.ndjson
+      alt HEC forwarding enabled
+        R->>HEC: HTTPS POST (optional gzip) with original JSON line
+        HEC-->>R: 2xx (ingested)  / non-2xx (retry/backoff)
+      end
+    end
+    deactivate R
+
+    Note over R,HEC: Relay may batch/retry; Splunk indexes by event time or ingest time depending on props
+```
+
 ## Requirements
 
 - Go 1.24.4 or later
