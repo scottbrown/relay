@@ -30,7 +30,7 @@ sequenceDiagram
     AC-->>ZC: Telemetry, audit, user/app metrics (proprietary)
 
     Note over LSS,R: LSS initiates outbound connection to your receiver
-    LSS-)R: TCP/TLS connect to relay:port
+    LSS->R: TCP/TLS connect to relay:port
     activate R
 
     loop Streaming (long-lived socket)
