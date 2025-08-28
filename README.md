@@ -79,13 +79,25 @@ This creates the binary at `.build/relay`.
 Create a YAML configuration file (default location: `/etc/relay/config.yml`):
 
 ```yaml
-listen_port: "9514"
-splunk_hec_url: "https://your-instance.splunkcloud.com:8088/services/collector"
-splunk_token: "your-hec-token-here"
-source_type: "zscaler:zpa:lss"
-index: "zscaler"
-batch_size: 100
-batch_timeout: "5s"
+# TCP/TLS server settings
+listen_addr: ":9015"                    # TCP listen address (e.g., :9015)
+tls_cert_file: ""                       # TLS cert file (optional)
+tls_key_file: ""                        # TLS key file (optional)
+
+# Storage settings
+output_dir: "./zpa-logs"                # Directory to persist NDJSON files
+
+# Splunk HEC settings
+splunk_hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
+splunk_token: "your-hec-token-here"     # Splunk HEC token
+source_type: "zpa:lss"                  # Splunk sourcetype
+
+# Security settings
+allowed_cidrs: ""                       # Comma-separated CIDRs allowed to connect (optional)
+
+# Performance settings
+gzip_hec: true                          # Gzip compress payloads to HEC
+max_line_bytes: 1048576                 # Max bytes per JSON line (1 MiB)
 ```
 
 ### Generate Configuration Template
