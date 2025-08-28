@@ -1,17 +1,18 @@
 ![logo](relay.logo.large.png)
 
-# Relay
-
-A high-performance TCP relay service that receives Zscaler ZPA LSS (Log Streaming Service) data and forwards it to Splunk HEC (HTTP Event Collector). The application acts as an efficient middleware layer that batches log events for optimized delivery to Splunk.
+Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log Streaming Service) data and forwards it to Splunk HEC (HTTP Event Collector). The application acts as a streaming middleware that persists logs locally as NDJSON files and optionally forwards them to Splunk HEC in real-time.
 
 ## Features
 
 - **TCP Server**: Accepts incoming connections from Zscaler ZPA LSS
-- **Event Batching**: Configurable batch size and timeout for efficient Splunk delivery
-- **JSON Parsing**: Intelligent parsing with fallback to raw text for malformed data
-- **Splunk HEC Integration**: Direct integration with Splunk's HTTP Event Collector
-- **Configuration Flexibility**: YAML configuration file or command-line flags
+- **Data Validation**: JSON validation for incoming log lines
+- **Local Storage**: Daily-rotated NDJSON file persistence
+- **Splunk HEC Integration**: Optional real-time forwarding to Splunk's HTTP Event Collector
+- **TLS Support**: Optional TLS encryption for incoming connections
+- **Access Control**: CIDR-based IP filtering
+- **Configuration Flexibility**: Command-line flags with optional YAML configuration
 - **Template Generation**: Built-in configuration template generator
+- **Health Checks**: Smoke testing for Splunk HEC connectivity
 - **Graceful Shutdown**: Handles system signals for clean service termination
 
 ## How it Works
@@ -48,7 +49,7 @@ sequenceDiagram
 
 ## Requirements
 
-- Go 1.24.4 or later
+- Go 1.21 or later
 - Access to a Splunk instance with HEC enabled
 - Network connectivity between Zscaler ZPA and the relay service
 
@@ -59,7 +60,7 @@ sequenceDiagram
 ```bash
 git clone https://github.com/scottbrown/relay.git
 cd relay
-go build -o relay main.go
+go build -o relay cmd/relay/main.go
 ```
 
 ### Using Task Runner
@@ -74,9 +75,15 @@ This creates the binary at `.build/relay`.
 
 ## Configuration
 
-### Configuration File
+### Configuration File (Optional)
 
-Create a YAML configuration file (default location: `/etc/relay/config.yml`):
+The application can optionally use a YAML configuration file. Create one using the template generator:
+
+```bash
+./relay -t > config.yml
+```
+
+Example configuration:
 
 ```yaml
 # TCP/TLS server settings
@@ -110,20 +117,33 @@ max_line_bytes: 1048576                 # Max bytes per JSON line (1 MiB)
 
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
-| `listen_port` | TCP port to listen on | No | `9514` |
-| `splunk_hec_url` | Splunk HEC endpoint URL | Yes | - |
-| `splunk_token` | Splunk HEC authentication token | Yes | - |
-| `source_type` | Splunk sourcetype for events | No | `zscaler:zpa:lss` |
-| `index` | Splunk index name | No | `zscaler` |
-| `batch_size` | Number of events per batch | No | `100` |
-| `batch_timeout` | Maximum time to wait before sending batch | No | `5s` |
+| `listen_addr` | TCP listen address | No | `:9015` |
+| `tls_cert_file` | TLS certificate file | No | - |
+| `tls_key_file` | TLS key file | No | - |
+| `output_dir` | Directory for NDJSON files | No | `./zpa-logs` |
+| `splunk_hec_url` | Splunk HEC raw endpoint URL | No | - |
+| `splunk_token` | Splunk HEC authentication token | No | - |
+| `source_type` | Splunk sourcetype | No | `zpa:lss` |
+| `allowed_cidrs` | Comma-separated allowed CIDRs | No | - |
+| `gzip_hec` | Gzip compress HEC payloads | No | `true` |
+| `max_line_bytes` | Max bytes per JSON line | No | `1048576` |
 
 ## Usage
 
 ### Basic Usage
 
 ```bash
+# Run with default settings (local storage only)
+./relay
+
+# Run with Splunk HEC forwarding
+./relay -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
+
+# Run with configuration file
 ./relay -f /path/to/config.yml
+
+# Test Splunk HEC connectivity
+./relay -smoke-test -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
 ```
 
 ### Command-Line Options
@@ -132,52 +152,52 @@ max_line_bytes: 1048576                 # Max bytes per JSON line (1 MiB)
 ./relay [options]
 
 Options:
+  -listen string
+        TCP listen address (e.g., :9015)
+  -tls-cert string
+        TLS cert file (optional)
+  -tls-key string
+        TLS key file (optional)
+  -out string
+        Directory to persist NDJSON
+  -hec-url string
+        Splunk HEC raw endpoint
+  -hec-token string
+        Splunk HEC token
+  -hec-sourcetype string
+        Splunk sourcetype
+  -allow-cidrs string
+        Comma-separated CIDRs allowed to connect
+  -hec-gzip
+        Gzip compress payloads to HEC
+  -max-line-bytes int
+        Max bytes per JSON line
   -f string
-        Configuration file path (default "/etc/relay/config.yml")
+        Configuration file path
   -t    Output configuration template and exit
-  -h    Show help message
-```
-
-### Running with Custom Configuration
-
-```bash
-# Using custom config file
-./relay -f ./my-config.yml
-
-# Generate template
-./relay -t > my-config.yml
+  -smoke-test
+        Test Splunk HEC connectivity and exit
 ```
 
 ### Running Directly with Go
 
 ```bash
-go run main.go -f config.yml
+go run cmd/relay/main.go -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
 ```
 
 ## Architecture
 
 ### Data Flow
 
-1. **TCP Listener**: Accepts connections on the configured port (default 9514)
-2. **Data Processing**: Incoming data is parsed as JSON (falls back to raw text)
-3. **Event Wrapping**: Data is wrapped in Splunk event format with metadata
-4. **Batching**: Events are queued and batched based on size or timeout
-5. **Splunk Delivery**: Batched events are sent to Splunk HEC via HTTP POST
+1. **TCP/TLS Listener**: Accepts connections on the configured address (default :9015)
+2. **Access Control**: Optional CIDR-based filtering for incoming connections
+3. **Data Validation**: Incoming NDJSON data is validated and line-limited for security
+4. **Local Storage**: Data is persisted locally to daily-rotated files (zpa-YYYY-MM-DD.ndjson)
+5. **Real-time Forwarding**: Optional concurrent forwarding to Splunk HEC raw endpoint with retry logic
 
 ### Event Format
 
-Events sent to Splunk follow this structure:
-
-```json
-{
-  "time": 1641234567,
-  "host": "relay-server",
-  "source": "tcp:9514",
-  "sourcetype": "zscaler:zpa:lss",
-  "index": "zscaler",
-  "event": { /* original log data */ }
-}
-```
+Data is forwarded to Splunk HEC as raw JSON events (one per line) without additional wrapping. The sourcetype is configurable (default: "zpa:lss").
 
 ## Monitoring and Logging
 
@@ -198,7 +218,7 @@ The service logs to stdout and includes:
 
 ```bash
 # Using Go directly
-go build -o relay main.go
+go build -o relay cmd/relay/main.go
 
 # Using Task
 task build
@@ -250,7 +270,7 @@ sudo systemctl start relay
 FROM golang:1.24-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN go build -o relay main.go
+RUN go build -o relay cmd/relay/main.go
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
@@ -280,12 +300,6 @@ journalctl -u relay -f
 # Docker
 docker logs <container_id>
 ```
-
-## Performance Tuning
-
-- **Batch Size**: Increase `batch_size` for higher throughput, decrease for lower latency
-- **Batch Timeout**: Balance between latency and efficiency
-- **System Resources**: Monitor CPU and memory usage under load
 
 ## Contributing
 
