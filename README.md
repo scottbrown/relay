@@ -30,7 +30,7 @@ sequenceDiagram
     AC-->>ZC: Telemetry, audit, user/app metrics (proprietary)
 
     Note over LSS,R: LSS initiates outbound connection to your receiver
-    LSS->R: TCP/TLS connect to relay:port
+    LSS-)R: TCP/TLS connect to relay:port
     activate R
 
     loop Streaming (long-lived socket)
@@ -43,7 +43,7 @@ sequenceDiagram
     end
     deactivate R
 
-    Note over R,HEC: Relay may batch/retry; Splunk indexes by event time or ingest time depending on props
+    Note over R,HEC: Relay may batch/retry. Splunk indexes by event time or ingest time depending on props
 ```
 
 ## Requirements
