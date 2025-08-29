@@ -1,91 +1,116 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
 
+	"github.com/scottbrown/relay"
 	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/config"
 	"github.com/scottbrown/relay/internal/forwarder"
 	"github.com/scottbrown/relay/internal/server"
 	"github.com/scottbrown/relay/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 var (
-	configFile    = flag.String("f", "", "Path to configuration file")
-	templateFlag  = flag.Bool("t", false, "Output configuration template and exit")
-	smokeTestFlag = flag.Bool("smoke-test", false, "Test Splunk HEC connectivity and exit")
-	listenAddr    = flag.String("listen", "", "TCP listen address (e.g., :9015)")
-	tlsCertFile   = flag.String("tls-cert", "", "TLS cert file (optional)")
-	tlsKeyFile    = flag.String("tls-key", "", "TLS key file (optional)")
-	outDir        = flag.String("out", "", "Directory to persist NDJSON")
-	hecURL        = flag.String("hec-url", "", "Splunk HEC raw endpoint")
-	hecToken      = flag.String("hec-token", "", "Splunk HEC token")
-	hecSourcetype = flag.String("hec-sourcetype", "", "Splunk sourcetype")
-	allowedCIDRs  = flag.String("allow-cidrs", "", "Comma-separated CIDRs allowed to connect")
-	gzipHEC       = flag.Bool("hec-gzip", false, "Gzip compress payloads to HEC (use with explicit flag)")
-	maxLineBytes  = flag.Int("max-line-bytes", 0, "Max bytes per JSON line")
-)
+	configFile    string
+	templateFlag  bool
+	smokeTestFlag bool
+	listenAddr    string
+	tlsCertFile   string
+	tlsKeyFile    string
+	outDir        string
+	hecURL        string
+	hecToken      string
+	hecSourcetype string
+	allowedCIDRs  string
+	gzipHEC       bool
+	maxLineBytes  int
 
-func main() {
-	flag.Parse()
-
-	// Handle template output
-	if *templateFlag {
-		fmt.Print(config.GetTemplate())
-		os.Exit(0)
+	rootCmd = &cobra.Command{
+		Use:     "relay",
+		Short:   "TCP relay service for Zscaler ZPA LSS data to Splunk HEC",
+		Long:    "A TCP relay service that receives Zscaler ZPA LSS data and forwards it to Splunk HEC with local persistence.",
+		Version: relay.Version(),
+		Run:     runRelay,
 	}
 
+	templateCmd = &cobra.Command{
+		Use:   "template",
+		Short: "Output configuration template",
+		Long:  "Output a YAML configuration template and exit",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Print(config.GetTemplate())
+		},
+	}
+
+	smokeTestCmd = &cobra.Command{
+		Use:   "smoke-test",
+		Short: "Test Splunk HEC connectivity",
+		Long:  "Test connectivity to Splunk HEC and exit",
+		Run: func(cmd *cobra.Command, args []string) {
+			// Load configuration
+			cfg, err := config.LoadConfig(configFile)
+			if err != nil {
+				log.Fatalf("config: %v", err)
+			}
+
+			// Override with CLI flags
+			applyFlagOverrides(cfg, cmd)
+
+			performSmokeTest(cfg)
+		},
+	}
+)
+
+func init() {
+	// Add subcommands
+	rootCmd.AddCommand(templateCmd)
+	rootCmd.AddCommand(smokeTestCmd)
+
+	// Root command flags
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "f", "", "Path to configuration file")
+	rootCmd.Flags().StringVar(&listenAddr, "listen", "", "TCP listen address (e.g., :9015)")
+	rootCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "TLS cert file (optional)")
+	rootCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "TLS key file (optional)")
+	rootCmd.Flags().StringVar(&outDir, "out", "", "Directory to persist NDJSON")
+	rootCmd.Flags().StringVar(&hecURL, "hec-url", "", "Splunk HEC raw endpoint")
+	rootCmd.Flags().StringVar(&hecToken, "hec-token", "", "Splunk HEC token")
+	rootCmd.Flags().StringVar(&hecSourcetype, "hec-sourcetype", "", "Splunk sourcetype")
+	rootCmd.Flags().StringVar(&allowedCIDRs, "allow-cidrs", "", "Comma-separated CIDRs allowed to connect")
+	rootCmd.Flags().BoolVar(&gzipHEC, "hec-gzip", false, "Gzip compress payloads to HEC")
+	rootCmd.Flags().IntVar(&maxLineBytes, "max-line-bytes", 0, "Max bytes per JSON line")
+
+	// Smoke test command flags (inherits persistent flags)
+	smokeTestCmd.Flags().StringVar(&listenAddr, "listen", "", "TCP listen address (e.g., :9015)")
+	smokeTestCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "TLS cert file (optional)")
+	smokeTestCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "TLS key file (optional)")
+	smokeTestCmd.Flags().StringVar(&outDir, "out", "", "Directory to persist NDJSON")
+	smokeTestCmd.Flags().StringVar(&hecURL, "hec-url", "", "Splunk HEC raw endpoint")
+	smokeTestCmd.Flags().StringVar(&hecToken, "hec-token", "", "Splunk HEC token")
+	smokeTestCmd.Flags().StringVar(&hecSourcetype, "hec-sourcetype", "", "Splunk sourcetype")
+	smokeTestCmd.Flags().StringVar(&allowedCIDRs, "allow-cidrs", "", "Comma-separated CIDRs allowed to connect")
+	smokeTestCmd.Flags().BoolVar(&gzipHEC, "hec-gzip", false, "Gzip compress payloads to HEC")
+	smokeTestCmd.Flags().IntVar(&maxLineBytes, "max-line-bytes", 0, "Max bytes per JSON line")
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runRelay(cmd *cobra.Command, args []string) {
 	// Load configuration
-	cfg, err := config.LoadConfig(*configFile)
+	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
 
-	// Override config with CLI flags if provided (non-empty string flags or explicitly set flags)
-	if *listenAddr != "" {
-		cfg.ListenAddr = *listenAddr
-	}
-	if *tlsCertFile != "" {
-		cfg.TLSCertFile = *tlsCertFile
-	}
-	if *tlsKeyFile != "" {
-		cfg.TLSKeyFile = *tlsKeyFile
-	}
-	if *outDir != "" {
-		cfg.OutputDir = *outDir
-	}
-	if *hecURL != "" {
-		cfg.SplunkHECURL = *hecURL
-	}
-	if *hecToken != "" {
-		cfg.SplunkToken = *hecToken
-	}
-	if *hecSourcetype != "" {
-		cfg.SourceType = *hecSourcetype
-	}
-	if *allowedCIDRs != "" {
-		cfg.AllowedCIDRs = *allowedCIDRs
-	}
-	// For bool flags, check if they were explicitly set by examining flag.Args
-	visited := make(map[string]bool)
-	flag.Visit(func(f *flag.Flag) {
-		visited[f.Name] = true
-	})
-	if visited["hec-gzip"] {
-		cfg.GzipHEC = *gzipHEC
-	}
-	if visited["max-line-bytes"] {
-		cfg.MaxLineBytes = *maxLineBytes
-	}
-
-	// Handle smoke test
-	if *smokeTestFlag {
-		performSmokeTest(cfg)
-		os.Exit(0)
-	}
+	// Override config with CLI flags if provided
+	applyFlagOverrides(cfg, cmd)
 
 	// Initialize ACL
 	aclList, err := acl.New(cfg.AllowedCIDRs)
@@ -129,6 +154,40 @@ func main() {
 	}
 
 	log.Fatal(srv.Start())
+}
+
+func applyFlagOverrides(cfg *config.Config, cmd *cobra.Command) {
+	// Override config with CLI flags if provided (non-empty string flags or explicitly set flags)
+	if cmd.Flags().Changed("listen") {
+		cfg.ListenAddr = listenAddr
+	}
+	if cmd.Flags().Changed("tls-cert") {
+		cfg.TLSCertFile = tlsCertFile
+	}
+	if cmd.Flags().Changed("tls-key") {
+		cfg.TLSKeyFile = tlsKeyFile
+	}
+	if cmd.Flags().Changed("out") {
+		cfg.OutputDir = outDir
+	}
+	if cmd.Flags().Changed("hec-url") {
+		cfg.SplunkHECURL = hecURL
+	}
+	if cmd.Flags().Changed("hec-token") {
+		cfg.SplunkToken = hecToken
+	}
+	if cmd.Flags().Changed("hec-sourcetype") {
+		cfg.SourceType = hecSourcetype
+	}
+	if cmd.Flags().Changed("allow-cidrs") {
+		cfg.AllowedCIDRs = allowedCIDRs
+	}
+	if cmd.Flags().Changed("hec-gzip") {
+		cfg.GzipHEC = gzipHEC
+	}
+	if cmd.Flags().Changed("max-line-bytes") {
+		cfg.MaxLineBytes = maxLineBytes
+	}
 }
 
 // performSmokeTest tests connectivity to Splunk HEC
