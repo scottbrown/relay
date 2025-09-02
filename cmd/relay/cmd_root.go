@@ -9,11 +9,12 @@ import (
 	"github.com/scottbrown/relay/internal/forwarder"
 	"github.com/scottbrown/relay/internal/server"
 	"github.com/scottbrown/relay/internal/storage"
+
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "relay",
+	Use:     relay.AppName,
 	Short:   "TCP relay service for Zscaler ZPA LSS data to Splunk HEC",
 	Long:    "A TCP relay service that receives Zscaler ZPA LSS data and forwards it to Splunk HEC with local persistence.",
 	Version: relay.Version(),
