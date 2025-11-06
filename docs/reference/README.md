@@ -10,10 +10,7 @@ Planned reference documentation:
 
 - Configuration File Reference
 - Command-line Flags Reference
-- API Reference (if applicable)
-- File Format Specifications
 - Performance Benchmarks
-- Metrics Reference (Prometheus)
 - Environment Variables Reference
 - Exit Codes Reference
 

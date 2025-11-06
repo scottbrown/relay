@@ -11,7 +11,6 @@ Planned tutorials:
 - Getting Started with Relay
 - Setting Up Your First ZPA LSS Connection
 - Deploying Relay with Docker
-- Configuring TLS for Secure Connections
 
 ## Contributing
 
