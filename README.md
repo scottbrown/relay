@@ -301,6 +301,18 @@ journalctl -u relay -f
 docker logs <container_id>
 ```
 
+## Documentation
+
+### Architecture Decision Records
+
+Key architectural decisions and their rationale are documented as Architecture Decision Records (ADRs). See [docs/adr/](docs/adr/) for the complete list of decisions including:
+
+- Why we use Go Task instead of Make
+- Daily log rotation based on UTC
+- NDJSON format for local storage
+- Store-first, forward-second approach
+- And more...
+
 ## Contributing
 
 1. Fork the repository
