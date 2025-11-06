@@ -301,6 +301,20 @@ journalctl -u relay -f
 docker logs <container_id>
 ```
 
+## Documentation
+
+Documentation is organised using the [Diátaxis framework](https://diataxis.fr/) for clarity and discoverability. See [docs/](docs/) for the complete documentation structure.
+
+### Architecture Decision Records
+
+Key architectural decisions and their rationale are documented as Architecture Decision Records (ADRs). See [docs/explanation/adr/](docs/explanation/adr/) for the complete list of decisions including:
+
+- Why we use Go Task instead of Make
+- Daily log rotation based on UTC
+- NDJSON format for local storage
+- Store-first, forward-second approach
+- And more...
+
 ## Contributing
 
 1. Fork the repository
