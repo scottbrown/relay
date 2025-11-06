@@ -60,6 +60,12 @@ func applyFlagOverrides(cfg *config.Config, cmd *cobra.Command) {
 	if cmd.Flags().Changed("max-line-bytes") {
 		cfg.MaxLineBytes = maxLineBytes
 	}
+	if cmd.Flags().Changed("health-check-enabled") {
+		cfg.HealthCheckEnabled = healthCheckEnabled
+	}
+	if cmd.Flags().Changed("health-check-addr") {
+		cfg.HealthCheckAddr = healthCheckAddr
+	}
 }
 
 // performSmokeTest tests connectivity to Splunk HEC

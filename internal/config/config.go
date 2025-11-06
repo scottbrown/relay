@@ -10,36 +10,42 @@ import (
 )
 
 const (
-	DefaultListenAddr   string = ":9015"
-	DefaultOutputDir    string = "./zpa-logs"
-	DefaultSourceType   string = "zpa:lss"
-	DefaultMaxLineBytes int    = 1 << 20 // 1 MiB
+	DefaultListenAddr         string = ":9015"
+	DefaultOutputDir          string = "./zpa-logs"
+	DefaultSourceType         string = "zpa:lss"
+	DefaultMaxLineBytes       int    = 1 << 20 // 1 MiB
+	DefaultHealthCheckAddr    string = ":9016"
+	DefaultHealthCheckEnabled bool   = false
 )
 
 //go:embed config.template.yml
 var configTemplate string
 
 type Config struct {
-	ListenAddr   string `yaml:"listen_addr"`
-	TLSCertFile  string `yaml:"tls_cert_file"`
-	TLSKeyFile   string `yaml:"tls_key_file"`
-	OutputDir    string `yaml:"output_dir"`
-	SplunkHECURL string `yaml:"splunk_hec_url"`
-	SplunkToken  string `yaml:"splunk_token"`
-	SourceType   string `yaml:"source_type"`
-	AllowedCIDRs string `yaml:"allowed_cidrs"`
-	GzipHEC      bool   `yaml:"gzip_hec"`
-	MaxLineBytes int    `yaml:"max_line_bytes"`
+	ListenAddr         string `yaml:"listen_addr"`
+	TLSCertFile        string `yaml:"tls_cert_file"`
+	TLSKeyFile         string `yaml:"tls_key_file"`
+	OutputDir          string `yaml:"output_dir"`
+	SplunkHECURL       string `yaml:"splunk_hec_url"`
+	SplunkToken        string `yaml:"splunk_token"`
+	SourceType         string `yaml:"source_type"`
+	AllowedCIDRs       string `yaml:"allowed_cidrs"`
+	GzipHEC            bool   `yaml:"gzip_hec"`
+	MaxLineBytes       int    `yaml:"max_line_bytes"`
+	HealthCheckEnabled bool   `yaml:"health_check_enabled"`
+	HealthCheckAddr    string `yaml:"health_check_addr"`
 }
 
 func LoadConfig(configFile string) (*Config, error) {
 	// Set default values
 	config := &Config{
-		ListenAddr:   DefaultListenAddr,
-		OutputDir:    DefaultOutputDir,
-		SourceType:   DefaultSourceType,
-		GzipHEC:      true,
-		MaxLineBytes: DefaultMaxLineBytes,
+		ListenAddr:         DefaultListenAddr,
+		OutputDir:          DefaultOutputDir,
+		SourceType:         DefaultSourceType,
+		GzipHEC:            true,
+		MaxLineBytes:       DefaultMaxLineBytes,
+		HealthCheckEnabled: DefaultHealthCheckEnabled,
+		HealthCheckAddr:    DefaultHealthCheckAddr,
 	}
 
 	// If no config file specified, return defaults

@@ -7,6 +7,7 @@ import (
 	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/config"
 	"github.com/scottbrown/relay/internal/forwarder"
+	"github.com/scottbrown/relay/internal/healthcheck"
 	"github.com/scottbrown/relay/internal/server"
 	"github.com/scottbrown/relay/internal/storage"
 
@@ -59,6 +60,19 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			log.Fatalf("Splunk HEC health check failed: %v", err)
 		}
 		log.Printf("Splunk HEC connectivity verified successfully")
+	}
+
+	// Initialize and start healthcheck server if enabled
+	if cfg.HealthCheckEnabled {
+		healthSrv, err := healthcheck.New(cfg.HealthCheckAddr)
+		if err != nil {
+			log.Fatalf("healthcheck: %v", err)
+		}
+		defer healthSrv.Stop()
+
+		if err := healthSrv.Start(); err != nil {
+			log.Fatalf("healthcheck start: %v", err)
+		}
 	}
 
 	// Initialize and start server

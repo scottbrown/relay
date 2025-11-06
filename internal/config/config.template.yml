@@ -18,3 +18,7 @@ allowed_cidrs: ""                       # Comma-separated CIDRs allowed to conne
 # Performance settings
 gzip_hec: true                          # Gzip compress payloads to HEC
 max_line_bytes: 1048576                 # Max bytes per JSON line (1 MiB)
+
+# Healthcheck settings
+health_check_enabled: false             # Enable TCP healthcheck server
+health_check_addr: ":9016"              # Healthcheck listen address
