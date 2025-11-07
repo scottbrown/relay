@@ -3,8 +3,10 @@ package server
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/forwarder"
@@ -22,6 +24,7 @@ type Config struct {
 
 // Server represents the TCP relay server
 type Server struct {
+	mu        sync.RWMutex
 	config    Config
 	acl       *acl.List
 	storage   *storage.Manager
@@ -84,13 +87,16 @@ func (s *Server) acceptLoop() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			log.Printf("accept: %v", err)
 			continue
 		}
 
 		// Check ACL
 		ra, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
-		if !s.acl.Allows(ra.IP) {
+		if !s.allows(ra.IP) {
 			log.Printf("deny %s", ra.IP)
 			conn.Close()
 			continue
@@ -106,7 +112,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	br := bufio.NewReader(conn)
 
 	for {
-		line, err := processor.ReadLineLimited(br, s.config.MaxLineBytes)
+		line, err := processor.ReadLineLimited(br, s.getMaxLineBytes())
 		if err != nil {
 			if err.Error() != "EOF" {
 				log.Printf("read: %v", err)
@@ -131,4 +137,33 @@ func (s *Server) handleConnection(conn net.Conn) {
 			log.Printf("hec: %v", err)
 		}
 	}
+}
+
+func (s *Server) allows(ip net.IP) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.acl == nil {
+		return true
+	}
+	return s.acl.Allows(ip)
+}
+
+func (s *Server) getMaxLineBytes() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.MaxLineBytes
+}
+
+// UpdateACL swaps the in-memory ACL with a new list.
+func (s *Server) UpdateACL(list *acl.List) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.acl = list
+}
+
+// UpdateMaxLineBytes updates the per-line limit enforced on inbound messages.
+func (s *Server) UpdateMaxLineBytes(limit int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config.MaxLineBytes = limit
 }

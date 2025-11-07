@@ -378,7 +378,7 @@ func TestGetHealthURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := Config{URL: tt.inputURL}
 			hec := New(config)
-			result := hec.getHealthURL()
+			result := hec.getHealthURL(config)
 			if result != tt.expectedURL {
 				t.Errorf("expected URL %q, got %q", tt.expectedURL, result)
 			}
@@ -393,7 +393,7 @@ func TestSendWithRetry_RequestError(t *testing.T) {
 	}
 
 	hec := New(config)
-	err := hec.sendWithRetry([]byte("test data"))
+	err := hec.sendWithRetry([]byte("test data"), config)
 	if err == nil {
 		t.Fatal("expected error for invalid URL")
 	}

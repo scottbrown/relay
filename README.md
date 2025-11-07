@@ -185,6 +185,15 @@ Options:
 go run cmd/relay/main.go -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
 ```
 
+### Reload Configuration
+
+Relay watches for `SIGHUP` and, when a configuration file is provided, reloads the YAML without stopping the process. Splunk HEC credentials, sourcetype, gzip settings, `allowed_cidrs`, `max_line_bytes`, and health-check settings are applied immediately (CLI flag overrides are respected). Listener address, TLS files, and `output_dir` still require a restart; Relay will log a warning if those values change on reload.
+
+```bash
+# Trigger reload after editing relay.yml
+kill -HUP $(pgrep relay)
+```
+
 ## Architecture
 
 ### Data Flow

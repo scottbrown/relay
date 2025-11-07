@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Config struct {
 
 // HEC represents a Splunk HTTP Event Collector forwarder
 type HEC struct {
+	mu     sync.RWMutex
 	config Config
 	client *http.Client
 }
@@ -34,28 +36,30 @@ func New(config Config) *HEC {
 
 // Forward sends data to Splunk HEC with retry logic
 func (h *HEC) Forward(data []byte) error {
-	if h.config.URL == "" || h.config.Token == "" {
+	cfg := h.getConfig()
+	if cfg.URL == "" || cfg.Token == "" {
 		return nil // HEC forwarding disabled
 	}
 
-	return h.sendWithRetry(data)
+	return h.sendWithRetry(data, cfg)
 }
 
 // HealthCheck verifies that the HEC endpoint and token are valid
 func (h *HEC) HealthCheck() error {
-	if h.config.URL == "" || h.config.Token == "" {
+	cfg := h.getConfig()
+	if cfg.URL == "" || cfg.Token == "" {
 		return errors.New("HEC URL or token not configured")
 	}
 
 	// Convert the collector URL to health check URL
-	healthURL := h.getHealthURL()
+	healthURL := h.getHealthURL(cfg)
 
 	req, err := http.NewRequest("GET", healthURL, nil)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Authorization", "Splunk "+h.config.Token)
+	req.Header.Set("Authorization", "Splunk "+cfg.Token)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -74,8 +78,8 @@ func (h *HEC) HealthCheck() error {
 }
 
 // getHealthURL converts collector URL to health endpoint URL
-func (h *HEC) getHealthURL() string {
-	url := h.config.URL
+func (h *HEC) getHealthURL(cfg Config) string {
+	url := cfg.URL
 
 	// Replace common collector endpoints with health endpoint
 	if strings.Contains(url, "/services/collector/raw") {
@@ -100,11 +104,11 @@ func (h *HEC) getHealthURL() string {
 	return baseURL + "/services/collector/health"
 }
 
-func (h *HEC) sendWithRetry(data []byte) error {
+func (h *HEC) sendWithRetry(data []byte, cfg Config) error {
 	var body io.Reader = bytes.NewReader(data)
 	var contentEnc string
 
-	if h.config.UseGzip {
+	if cfg.UseGzip {
 		var buf bytes.Buffer
 		zw := gzip.NewWriter(&buf)
 		if _, err := zw.Write(data); err != nil {
@@ -117,21 +121,21 @@ func (h *HEC) sendWithRetry(data []byte) error {
 		contentEnc = "gzip"
 	}
 
-	req, err := http.NewRequest("POST", h.config.URL, body)
+	req, err := http.NewRequest("POST", cfg.URL, body)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Authorization", "Splunk "+h.config.Token)
+	req.Header.Set("Authorization", "Splunk "+cfg.Token)
 	req.Header.Set("Content-Type", "text/plain")
 	if contentEnc != "" {
 		req.Header.Set("Content-Encoding", contentEnc)
 	}
 
 	// Add sourcetype to query parameters if specified
-	if h.config.SourceType != "" {
+	if cfg.SourceType != "" {
 		q := req.URL.Query()
-		q.Set("sourcetype", h.config.SourceType)
+		q.Set("sourcetype", cfg.SourceType)
 		req.URL.RawQuery = q.Encode()
 	}
 
@@ -151,4 +155,17 @@ func (h *HEC) sendWithRetry(data []byte) error {
 	}
 
 	return errors.New("hec send failed after retries")
+}
+
+// UpdateConfig swaps the runtime configuration used for forwarding.
+func (h *HEC) UpdateConfig(cfg Config) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.config = cfg
+}
+
+func (h *HEC) getConfig() Config {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.config
 }
