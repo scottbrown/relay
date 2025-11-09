@@ -8,18 +8,22 @@ import (
 
 // Manager handles file persistence with daily rotation
 type Manager struct {
-	baseDir string
-	file    *os.File
-	curDay  string
+	baseDir    string
+	filePrefix string
+	file       *os.File
+	curDay     string
 }
 
-// New creates a new storage manager for the given directory
-func New(baseDir string) (*Manager, error) {
+// New creates a new storage manager for the given directory with the specified file prefix
+func New(baseDir, filePrefix string) (*Manager, error) {
 	if err := ensureDir(baseDir); err != nil {
 		return nil, err
 	}
 
-	return &Manager{baseDir: baseDir}, nil
+	return &Manager{
+		baseDir:    baseDir,
+		filePrefix: filePrefix,
+	}, nil
 }
 
 // Write writes data to the current day's file, rotating if necessary
@@ -57,11 +61,11 @@ func (m *Manager) CurrentFile() string {
 	if m.curDay == "" {
 		return ""
 	}
-	return filepath.Join(m.baseDir, "zpa-"+m.curDay+".ndjson")
+	return filepath.Join(m.baseDir, m.filePrefix+"-"+m.curDay+".ndjson")
 }
 
 func (m *Manager) openDayFile(day string) (*os.File, error) {
-	path := filepath.Join(m.baseDir, "zpa-"+day+".ndjson")
+	path := filepath.Join(m.baseDir, m.filePrefix+"-"+day+".ndjson")
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 }
 

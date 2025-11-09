@@ -27,7 +27,7 @@ func TestNew(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	storageManager, err := storage.New(tmpDir)
+	storageManager, err := storage.New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestStart_TCP(t *testing.T) {
 
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -125,14 +125,14 @@ func TestHandleConnection_StorageError(t *testing.T) {
 		t.Fatalf("failed to create bad path: %v", err)
 	}
 
-	storageManager, err := storage.New(badPath)
+	storageManager, err := storage.New(badPath, "zpa")
 	if err == nil {
 		storageManager.Close()
 		t.Skip("expected storage creation to fail")
 	}
 
 	// Use a working storage for the test
-	workingStorage, _ := storage.New(tmpDir)
+	workingStorage, _ := storage.New(tmpDir, "zpa")
 	defer workingStorage.Close()
 
 	hecForwarder := forwarder.New(forwarder.Config{})
@@ -163,7 +163,7 @@ func TestStart_InvalidTLS(t *testing.T) {
 
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -187,7 +187,7 @@ func TestStart_InvalidAddress(t *testing.T) {
 
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -211,7 +211,7 @@ func TestStop_NoListener(t *testing.T) {
 
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -267,7 +267,7 @@ func TestHandleConnection_ValidJSON(t *testing.T) {
 	config := Config{MaxLineBytes: 1024}
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -298,7 +298,7 @@ func TestHandleConnection_InvalidJSON(t *testing.T) {
 	config := Config{MaxLineBytes: 1024}
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -328,7 +328,7 @@ func TestHandleConnection_LineTooLong(t *testing.T) {
 	config := Config{MaxLineBytes: 10} // Very small limit
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
@@ -358,7 +358,7 @@ func TestHandleConnection_MultipleLines(t *testing.T) {
 	config := Config{MaxLineBytes: 1024}
 	aclList, _ := acl.New("")
 	tmpDir := t.TempDir()
-	storageManager, _ := storage.New(tmpDir)
+	storageManager, _ := storage.New(tmpDir, "zpa")
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 

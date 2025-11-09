@@ -4,13 +4,14 @@ Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log
 
 ## Features
 
+- **Multi-Listener Support**: Configure multiple ports for different ZPA log types
 - **TCP Server**: Accepts incoming connections from Zscaler ZPA LSS
 - **Data Validation**: JSON validation for incoming log lines
-- **Local Storage**: Daily-rotated NDJSON file persistence
+- **Local Storage**: Daily-rotated NDJSON file persistence with configurable prefixes
 - **Splunk HEC Integration**: Optional real-time forwarding to Splunk's HTTP Event Collector
 - **TLS Support**: Optional TLS encryption for incoming connections
-- **Access Control**: CIDR-based IP filtering
-- **Configuration Flexibility**: Command-line flags with optional YAML configuration
+- **Access Control**: CIDR-based IP filtering per listener
+- **YAML Configuration**: Required configuration file for all settings
 - **Template Generation**: Built-in configuration template generator
 - **Health Checks**: Smoke testing for Splunk HEC connectivity
 - **Graceful Shutdown**: Handles system signals for clean service termination
@@ -75,129 +76,154 @@ This creates the binary at `.build/relay`.
 
 ## Configuration
 
-### Configuration File (Optional)
+### Configuration File (Required)
 
-The application can optionally use a YAML configuration file. Create one using the template generator:
+The application requires a YAML configuration file. Create one using the template generator:
 
 ```bash
-./relay -t > config.yml
+./relay template > config.yml
 ```
 
-Example configuration:
+Example configuration with multiple listeners:
 
 ```yaml
-# TCP/TLS server settings
-listen_addr: ":9015"                    # TCP listen address (e.g., :9015)
-tls_cert_file: ""                       # TLS cert file (optional)
-tls_key_file: ""                        # TLS key file (optional)
+# Global Splunk HEC configuration (shared across all listeners unless overridden)
+splunk:
+  hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
+  hec_token: "your-hec-token-here"
+  gzip: true
 
-# Storage settings
-output_dir: "./zpa-logs"                # Directory to persist NDJSON files
+# Global healthcheck configuration
+health_check_enabled: true
+health_check_addr: ":9099"
 
-# Splunk HEC settings
-splunk_hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
-splunk_token: "your-hec-token-here"     # Splunk HEC token
-source_type: "zpa:lss"                  # Splunk sourcetype
+# Listener configurations (one per ZPA log type)
+listeners:
+  # User Activity logs
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-user-activity"
+    allowed_cidrs: "10.0.0.0/8"
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:user:activity"
 
-# Security settings
-allowed_cidrs: ""                       # Comma-separated CIDRs allowed to connect (optional)
-
-# Performance settings
-gzip_hec: true                          # Gzip compress payloads to HEC
-max_line_bytes: 1048576                 # Max bytes per JSON line (1 MiB)
+  # User Status logs
+  - name: "user-status"
+    listen_addr: ":9016"
+    log_type: "user-status"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-user-status"
+    allowed_cidrs: "10.0.0.0/8"
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:user:status"
 ```
 
 ### Generate Configuration Template
 
 ```bash
-./relay -t > config.yml
+./relay template > config.yml
 ```
 
-### Configuration Options
+### Global Configuration Options
 
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
-| `listen_addr` | TCP listen address | No | `:9015` |
-| `tls_cert_file` | TLS certificate file | No | - |
-| `tls_key_file` | TLS key file | No | - |
-| `output_dir` | Directory for NDJSON files | No | `./zpa-logs` |
-| `splunk_hec_url` | Splunk HEC raw endpoint URL | No | - |
-| `splunk_token` | Splunk HEC authentication token | No | - |
-| `source_type` | Splunk sourcetype | No | `zpa:lss` |
+| `splunk.hec_url` | Global Splunk HEC raw endpoint URL | No | - |
+| `splunk.hec_token` | Global Splunk HEC authentication token | No | - |
+| `splunk.gzip` | Global gzip compression for HEC | No | - |
+| `health_check_enabled` | Enable healthcheck endpoint | No | `false` |
+| `health_check_addr` | Healthcheck listen address | No | `:9099` |
+
+### Per-Listener Configuration Options
+
+| Option | Description | Required | Default |
+|--------|-------------|----------|---------|
+| `name` | Friendly identifier for the listener | Yes | - |
+| `listen_addr` | TCP listen address | Yes | - |
+| `log_type` | ZPA log type (must be valid) | Yes | - |
+| `output_dir` | Directory for NDJSON files | Yes | - |
+| `file_prefix` | File naming prefix | Yes | - |
+| `tls.cert_file` | TLS certificate file | No | - |
+| `tls.key_file` | TLS key file | No | - |
 | `allowed_cidrs` | Comma-separated allowed CIDRs | No | - |
-| `gzip_hec` | Gzip compress HEC payloads | No | `true` |
 | `max_line_bytes` | Max bytes per JSON line | No | `1048576` |
+| `splunk.source_type` | Splunk sourcetype for this listener | Yes* | - |
+| `splunk.hec_url` | Override global HEC URL | No | - |
+| `splunk.hec_token` | Override global HEC token | No | - |
+| `splunk.gzip` | Override global gzip setting | No | - |
+
+\* Required if global or per-listener HEC is configured
+
+### Valid Log Types
+
+- `user-activity`
+- `user-status`
+- `app-connector-status`
+- `pse-status`
+- `browser-access`
+- `audit`
+- `app-connector-metrics`
+- `pse-metrics`
 
 ## Usage
 
 ### Basic Usage
 
 ```bash
-# Run with default settings (local storage only)
-./relay
+# Run with configuration file (required)
+./relay --config /path/to/config.yml
 
-# Run with Splunk HEC forwarding
-./relay -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
+# Short form
+./relay -f config.yml
 
-# Run with configuration file
-./relay -f /path/to/config.yml
+# Generate configuration template
+./relay template > config.yml
 
-# Test Splunk HEC connectivity
-./relay -smoke-test -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
+# Test Splunk HEC connectivity for all listeners
+./relay smoke-test --config config.yml
 ```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| (default) | Start the relay service |
+| `template` | Generate configuration template and exit |
+| `smoke-test` | Test Splunk HEC connectivity for all listeners and exit |
 
 ### Command-Line Options
 
 ```bash
-./relay [options]
+./relay [command] --config <path>
 
 Options:
-  -listen string
-        TCP listen address (e.g., :9015)
-  -tls-cert string
-        TLS cert file (optional)
-  -tls-key string
-        TLS key file (optional)
-  -out string
-        Directory to persist NDJSON
-  -hec-url string
-        Splunk HEC raw endpoint
-  -hec-token string
-        Splunk HEC token
-  -hec-sourcetype string
-        Splunk sourcetype
-  -allow-cidrs string
-        Comma-separated CIDRs allowed to connect
-  -hec-gzip
-        Gzip compress payloads to HEC
-  -max-line-bytes int
-        Max bytes per JSON line
-  -f string
-        Configuration file path
-  -t    Output configuration template and exit
-  -smoke-test
-        Test Splunk HEC connectivity and exit
+  -f, --config string
+        Path to configuration file (required)
 ```
 
 ### Running Directly with Go
 
 ```bash
-go run cmd/relay/main.go -hec-url https://your-splunk.com:8088/services/collector/raw -hec-token your-token
+go run cmd/relay/main.go --config config.yml
 ```
 
 ## Architecture
 
 ### Data Flow
 
-1. **TCP/TLS Listener**: Accepts connections on the configured address (default :9015)
-2. **Access Control**: Optional CIDR-based filtering for incoming connections
+1. **Multi-Listener Setup**: Configure multiple TCP/TLS listeners, one per ZPA log type
+2. **Access Control**: Optional CIDR-based filtering for incoming connections per listener
 3. **Data Validation**: Incoming NDJSON data is validated and line-limited for security
-4. **Local Storage**: Data is persisted locally to daily-rotated files (zpa-YYYY-MM-DD.ndjson)
+4. **Local Storage**: Data is persisted locally to daily-rotated files ({file_prefix}-YYYY-MM-DD.ndjson)
 5. **Real-time Forwarding**: Optional concurrent forwarding to Splunk HEC raw endpoint with retry logic
 
 ### Event Format
 
-Data is forwarded to Splunk HEC as raw JSON events (one per line) without additional wrapping. The sourcetype is configurable (default: "zpa:lss").
+Data is forwarded to Splunk HEC as raw JSON events (one per line) without additional wrapping. The sourcetype is configurable per listener (e.g., "zpa:user:activity", "zpa:audit").
 
 ## Monitoring and Logging
 
