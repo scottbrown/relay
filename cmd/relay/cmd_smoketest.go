@@ -12,8 +12,8 @@ import (
 
 var smokeTestCmd = &cobra.Command{
 	Use:   "smoke-test",
-	Short: "Test Splunk HEC connectivity",
-	Long:  "Test connectivity to Splunk HEC and exit",
+	Short: "Test Splunk HEC connectivity for all configured listeners",
+	Long:  "Test connectivity to Splunk HEC for all configured listeners and exit",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Load configuration
 		cfg, err := config.LoadConfig(configFile)
@@ -21,85 +21,59 @@ var smokeTestCmd = &cobra.Command{
 			log.Fatalf("config: %v", err)
 		}
 
-		// Override with CLI flags
-		applyFlagOverrides(cfg, cmd)
-
 		performSmokeTest(cfg)
 	},
 }
 
-func applyFlagOverrides(cfg *config.Config, cmd *cobra.Command) {
-	// Override config with CLI flags if provided (non-empty string flags or explicitly set flags)
-	if cmd.Flags().Changed("listen") {
-		cfg.ListenAddr = listenAddr
-	}
-	if cmd.Flags().Changed("tls-cert") {
-		cfg.TLSCertFile = tlsCertFile
-	}
-	if cmd.Flags().Changed("tls-key") {
-		cfg.TLSKeyFile = tlsKeyFile
-	}
-	if cmd.Flags().Changed("out") {
-		cfg.OutputDir = outDir
-	}
-	if cmd.Flags().Changed("hec-url") {
-		cfg.SplunkHECURL = hecURL
-	}
-	if cmd.Flags().Changed("hec-token") {
-		cfg.SplunkToken = hecToken
-	}
-	if cmd.Flags().Changed("hec-sourcetype") {
-		cfg.SourceType = hecSourcetype
-	}
-	if cmd.Flags().Changed("allow-cidrs") {
-		cfg.AllowedCIDRs = allowedCIDRs
-	}
-	if cmd.Flags().Changed("hec-gzip") {
-		cfg.GzipHEC = gzipHEC
-	}
-	if cmd.Flags().Changed("max-line-bytes") {
-		cfg.MaxLineBytes = maxLineBytes
-	}
-	if cmd.Flags().Changed("health-check-enabled") {
-		cfg.HealthCheckEnabled = healthCheckEnabled
-	}
-	if cmd.Flags().Changed("health-check-addr") {
-		cfg.HealthCheckAddr = healthCheckAddr
-	}
-}
-
-// performSmokeTest tests connectivity to Splunk HEC
+// performSmokeTest tests connectivity to Splunk HEC for all listeners
 func performSmokeTest(cfg *config.Config) {
-	fmt.Printf("🔍 Testing Splunk HEC connectivity...\n")
-	fmt.Printf("URL: %s\n", cfg.SplunkHECURL)
+	fmt.Printf("🔍 Testing Splunk HEC connectivity for all listeners...\n\n")
 
-	if cfg.SplunkHECURL == "" {
-		fmt.Printf("❌ Error: Splunk HEC URL is not configured\n")
-		fmt.Printf("Please set splunk_hec_url in config file or use -hec-url flag\n")
+	hasErrors := false
+
+	for _, listenerCfg := range cfg.Listeners {
+		fmt.Printf("Listener: %s (%s)\n", listenerCfg.Name, listenerCfg.LogType)
+
+		// Merge global and per-listener HEC config
+		hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk)
+
+		if hecCfg.URL == "" {
+			fmt.Printf("  ⚠️  Warning: Splunk HEC URL is not configured for this listener\n\n")
+			continue
+		}
+
+		if hecCfg.Token == "" {
+			fmt.Printf("  ⚠️  Warning: Splunk HEC token is not configured for this listener\n\n")
+			continue
+		}
+
+		fmt.Printf("  URL: %s\n", hecCfg.URL)
+		fmt.Printf("  Source Type: %s\n", hecCfg.SourceType)
+		fmt.Printf("  Gzip: %v\n", hecCfg.UseGzip)
+
+		// Create HEC forwarder for testing
+		hecForwarder := forwarder.New(forwarder.Config{
+			URL:        hecCfg.URL,
+			Token:      hecCfg.Token,
+			SourceType: hecCfg.SourceType,
+			UseGzip:    hecCfg.UseGzip,
+		})
+
+		// Perform health check
+		err := hecForwarder.HealthCheck()
+		if err != nil {
+			fmt.Printf("  ❌ Error: %v\n\n", err)
+			hasErrors = true
+			continue
+		}
+
+		fmt.Printf("  ✅ Success: Splunk HEC is reachable and token is valid\n\n")
+	}
+
+	if hasErrors {
+		fmt.Printf("❌ Some listeners failed HEC connectivity test\n")
 		os.Exit(1)
 	}
 
-	if cfg.SplunkToken == "" {
-		fmt.Printf("❌ Error: Splunk HEC token is not configured\n")
-		fmt.Printf("Please set splunk_token in config file or use -hec-token flag\n")
-		os.Exit(1)
-	}
-
-	// Create HEC forwarder for testing
-	hecForwarder := forwarder.New(forwarder.Config{
-		URL:        cfg.SplunkHECURL,
-		Token:      cfg.SplunkToken,
-		SourceType: cfg.SourceType,
-		UseGzip:    cfg.GzipHEC,
-	})
-
-	// Perform health check
-	err := hecForwarder.HealthCheck()
-	if err != nil {
-		fmt.Printf("❌ Error: %v\n", err)
-		fmt.Printf("Please verify your Splunk HEC URL and token are correct\n")
-		os.Exit(1)
-	}
-
-	fmt.Printf("✅ Success: Splunk HEC is reachable and token is valid\n")
+	fmt.Printf("✅ All listeners passed HEC connectivity test\n")
 }

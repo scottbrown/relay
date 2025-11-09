@@ -10,13 +10,17 @@ import (
 func TestNew_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("New should succeed: %v", err)
 	}
 
 	if manager.baseDir != tmpDir {
 		t.Errorf("expected base dir %q, got %q", tmpDir, manager.baseDir)
+	}
+
+	if manager.filePrefix != "zpa" {
+		t.Errorf("expected file prefix %q, got %q", "zpa", manager.filePrefix)
 	}
 
 	if manager.file != nil {
@@ -32,7 +36,7 @@ func TestNew_CreateDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	nestedDir := filepath.Join(tmpDir, "nested", "directory")
 
-	manager, err := New(nestedDir)
+	manager, err := New(nestedDir, "zpa")
 	if err != nil {
 		t.Fatalf("New should create nested directories: %v", err)
 	}
@@ -61,7 +65,7 @@ func TestNew_InvalidDirectory(t *testing.T) {
 	}
 
 	// Try to create manager with file path as directory
-	_, err := New(existingFile)
+	_, err := New(existingFile, "zpa")
 	if err == nil {
 		t.Fatal("expected error when trying to use file as directory")
 	}
@@ -69,7 +73,7 @@ func TestNew_InvalidDirectory(t *testing.T) {
 
 func TestWrite_FirstWrite(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -109,7 +113,7 @@ func TestWrite_FirstWrite(t *testing.T) {
 
 func TestWrite_MultipleWrites(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -144,7 +148,7 @@ func TestWrite_MultipleWrites(t *testing.T) {
 
 func TestWrite_DayRotation(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -188,7 +192,7 @@ func TestWrite_DayRotation(t *testing.T) {
 
 func TestCurrentFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -217,7 +221,7 @@ func TestCurrentFile(t *testing.T) {
 
 func TestClose_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -230,7 +234,7 @@ func TestClose_NoFile(t *testing.T) {
 
 func TestClose_WithFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -282,7 +286,7 @@ func TestEnsureDir_ExistingDirectory(t *testing.T) {
 
 func TestOpenDayFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager, err := New(tmpDir)
+	manager, err := New(tmpDir, "zpa")
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}
@@ -310,5 +314,41 @@ func TestOpenDayFile(t *testing.T) {
 	_, err = file.Write(testData)
 	if err != nil {
 		t.Fatalf("should be able to write to file: %v", err)
+	}
+}
+
+func TestCustomFilePrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	customPrefix := "zpa-user-activity"
+	manager, err := New(tmpDir, customPrefix)
+	if err != nil {
+		t.Fatalf("failed to create manager: %v", err)
+	}
+	defer manager.Close()
+
+	// Write test data
+	testData := []byte(`{"test": "data"}`)
+	err = manager.Write(testData)
+	if err != nil {
+		t.Fatalf("Write should succeed: %v", err)
+	}
+
+	// Verify file was created with custom prefix
+	expectedDay := time.Now().UTC().Format("2006-01-02")
+	expectedPath := filepath.Join(tmpDir, customPrefix+"-"+expectedDay+".ndjson")
+	content, err := os.ReadFile(expectedPath)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	expectedContent := string(testData) + "\n"
+	if string(content) != expectedContent {
+		t.Errorf("expected content %q, got %q", expectedContent, string(content))
+	}
+
+	// Verify CurrentFile returns correct path
+	currentPath := manager.CurrentFile()
+	if currentPath != expectedPath {
+		t.Errorf("expected path %q, got %q", expectedPath, currentPath)
 	}
 }

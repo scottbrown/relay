@@ -1,24 +1,118 @@
 # Relay Configuration Template
-# TCP/TLS server settings
-listen_addr: ":9015"                    # TCP listen address (e.g., :9015)
-tls_cert_file: ""                       # TLS cert file (optional)
-tls_key_file: ""                        # TLS key file (optional)
+# Multi-listener configuration for ZPA LSS data to Splunk HEC
 
-# Storage settings
-output_dir: "./zpa-logs"                # Directory to persist NDJSON files
+# Global Splunk HEC configuration (shared across all listeners unless overridden)
+splunk:
+  hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
+  hec_token: "your-hec-token-here"
+  gzip: true
 
-# Splunk HEC settings
-splunk_hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
-splunk_token: "your-hec-token-here"     # Splunk HEC token
-source_type: "zpa:lss"                  # Splunk sourcetype
+# Global healthcheck configuration
+health_check_enabled: true
+health_check_addr: ":9099"
 
-# Security settings
-allowed_cidrs: ""                       # Comma-separated CIDRs allowed to connect (optional)
+# Listener configurations (one per ZPA log type)
+listeners:
+  # User Activity logs
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-user-activity"
+    # tls:
+    #   cert_file: "/path/to/cert.pem"
+    #   key_file: "/path/to/key.pem"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:user:activity"
 
-# Performance settings
-gzip_hec: true                          # Gzip compress payloads to HEC
-max_line_bytes: 1048576                 # Max bytes per JSON line (1 MiB)
+  # User Status logs
+  - name: "user-status"
+    listen_addr: ":9016"
+    log_type: "user-status"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-user-status"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:user:status"
 
-# Healthcheck settings
-health_check_enabled: false             # Enable TCP healthcheck server
-health_check_addr: ":9016"              # Healthcheck listen address
+  # App Connector Status logs
+  - name: "app-connector-status"
+    listen_addr: ":9017"
+    log_type: "app-connector-status"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-app-connector-status"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:app-connector:status"
+
+  # Private Service Edge Status logs
+  - name: "pse-status"
+    listen_addr: ":9018"
+    log_type: "pse-status"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-pse-status"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:pse:status"
+
+  # Browser Access logs
+  - name: "browser-access"
+    listen_addr: ":9019"
+    log_type: "browser-access"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-browser-access"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:browser:access"
+
+  # Audit logs
+  - name: "audit"
+    listen_addr: ":9020"
+    log_type: "audit"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-audit"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:audit"
+
+  # App Connector Metrics
+  - name: "app-connector-metrics"
+    listen_addr: ":9021"
+    log_type: "app-connector-metrics"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-app-connector-metrics"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:app-connector:metrics"
+      # Override: send metrics to different Splunk instance
+      # hec_url: "https://metrics-splunk.example.com:8088/services/collector/raw"
+      # hec_token: "metrics-specific-token-xyz"
+
+  # Private Service Edge Metrics
+  - name: "pse-metrics"
+    listen_addr: ":9022"
+    log_type: "pse-metrics"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-pse-metrics"
+    allowed_cidrs: ""
+    max_line_bytes: 1048576
+    splunk:
+      source_type: "zpa:pse:metrics"
+
+# Valid log types:
+# - user-activity
+# - user-status
+# - app-connector-status
+# - pse-status
+# - browser-access
+# - audit
+# - app-connector-metrics
+# - pse-metrics
