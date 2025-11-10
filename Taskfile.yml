@@ -80,16 +80,28 @@ tasks:
       - go test -v ./... -outputdir={{.TEST_DIR}}
 
   coverage:
-    desc: Generate test coverage report
-    deps: [setup]
+    desc: Generate test coverage report (all packages)
+    deps: [setup, build]
     cmds:
-      - go test -coverprofile={{.COVERAGE_FILE}} ./...
+      - go test -coverprofile={{.COVERAGE_FILE}} -tags=integration ./...
       - go tool cover -html={{.COVERAGE_FILE}} -o {{.COVERAGE_HTML}}
       - go tool cover -func={{.COVERAGE_FILE}}
       - echo "Coverage report generated at {{.COVERAGE_HTML}}"
     vars:
       COVERAGE_FILE: "{{.TEST_DIR}}/coverage.out"
       COVERAGE_HTML: "{{.TEST_DIR}}/coverage.html"
+
+  coverage-prod:
+    desc: Generate test coverage report (production packages only, excluding cmd and testutil)
+    deps: [setup, build]
+    cmds:
+      - go test -coverprofile={{.COVERAGE_FILE}} -tags=integration $(go list ./... | grep -v '/cmd/' | grep -v '/testutil/')
+      - go tool cover -html={{.COVERAGE_FILE}} -o {{.COVERAGE_HTML_PROD}}
+      - go tool cover -func={{.COVERAGE_FILE}}
+      - echo "Production code coverage report generated at {{.COVERAGE_HTML_PROD}}"
+    vars:
+      COVERAGE_FILE: "{{.TEST_DIR}}/coverage-prod.out"
+      COVERAGE_HTML_PROD: "{{.TEST_DIR}}/coverage-prod.html"
 
   bench:
     desc: Run performance benchmarks
