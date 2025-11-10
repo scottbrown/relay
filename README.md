@@ -169,6 +169,56 @@ listeners:
 - `app-connector-metrics`
 - `pse-metrics`
 
+### Startup Configuration Validation
+
+The application performs comprehensive "fail fast" validation during startup to detect configuration issues before beginning normal operation. This ensures runtime failures are minimised and problems are caught early.
+
+**Validations Performed:**
+
+1. **TLS Certificate Validation**
+   - Verifies TLS certificate and key files exist and are readable
+   - Loads the certificate to ensure it's valid and properly formatted
+   - Both cert and key must be specified together
+
+2. **Storage Directory Validation**
+   - Creates output directories if they don't exist (including nested paths)
+   - Tests directory writability by creating a temporary test file
+   - Ensures proper permissions before accepting connections
+
+3. **Splunk HEC Configuration Validation**
+   - Validates HEC URL format (must be HTTP or HTTPS with valid host)
+   - Ensures HEC token is present when HEC URL is configured
+   - Verifies sourcetype is specified when HEC forwarding is enabled
+
+4. **Network Configuration Validation**
+   - Verifies listen addresses are available by attempting to bind
+   - Detects port conflicts and address-in-use errors at startup
+   - Tests actual network connectivity before starting service
+
+5. **CIDR Access Control Validation**
+   - Parses and validates CIDR notation for allowed_cidrs
+   - Ensures proper IP address and subnet mask format
+   - Detects invalid CIDR expressions early
+
+**Example Error Messages:**
+
+```
+Error: listener user-activity: TLS cert file not accessible: open /path/to/cert.pem: no such file or directory
+Error: listener user-activity: failed to load TLS certificate: tls: failed to find any PEM data
+Error: listener user-activity: output directory not writable: permission denied
+Error: listener user-activity: invalid HEC URL: HEC URL must use http or https scheme
+Error: listener user-activity: HEC token required when HEC URL is specified
+Error: listener user-activity: invalid CIDR list: invalid CIDR address: invalid-cidr
+Error: listener user-activity: cannot bind to listen address: address already in use
+```
+
+**Benefits:**
+
+- Detects configuration errors immediately at startup
+- Provides clear, actionable error messages
+- Prevents runtime failures during normal operation
+- Reduces mean time to resolution for configuration issues
+
 ## Usage
 
 ### Basic Usage

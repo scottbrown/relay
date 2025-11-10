@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,5 +377,336 @@ func TestConstants(t *testing.T) {
 
 	if DefaultHealthCheckEnabled != false {
 		t.Errorf("expected default health check enabled false, got %v", DefaultHealthCheckEnabled)
+	}
+}
+
+// Test TLS certificate validation
+func TestLoadConfig_InvalidTLSCertificate(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	// Create invalid cert and key files
+	certFile := filepath.Join(tmpDir, "cert.pem")
+	keyFile := filepath.Join(tmpDir, "key.pem")
+
+	if err := os.WriteFile(certFile, []byte("invalid cert"), 0644); err != nil {
+		t.Fatalf("failed to create cert file: %v", err)
+	}
+	if err := os.WriteFile(keyFile, []byte("invalid key"), 0644); err != nil {
+		t.Fatalf("failed to create key file: %v", err)
+	}
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19015"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    tls:
+      cert_file: "%s"
+      key_file: "%s"
+    splunk:
+      source_type: "zpa:user:activity"
+`, tmpDir, certFile, keyFile)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err == nil {
+		t.Fatal("expected error for invalid TLS certificate")
+	}
+
+	if !strings.Contains(err.Error(), "failed to load TLS certificate") {
+		t.Errorf("expected error about loading TLS certificate, got %q", err.Error())
+	}
+}
+
+func TestLoadConfig_TLSCertFileNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19016"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    tls:
+      cert_file: "/nonexistent/cert.pem"
+      key_file: "/nonexistent/key.pem"
+    splunk:
+      source_type: "zpa:user:activity"
+`, tmpDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err == nil {
+		t.Fatal("expected error for missing TLS cert file")
+	}
+
+	if !strings.Contains(err.Error(), "TLS cert file not accessible") {
+		t.Errorf("expected error about TLS cert file, got %q", err.Error())
+	}
+}
+
+// Test HEC URL validation
+func TestLoadConfig_InvalidHECURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		hecURL   string
+		expected string
+	}{
+		{
+			name:     "missing scheme",
+			hecURL:   "test.splunk.com",
+			expected: "invalid HEC URL",
+		},
+		{
+			name:     "invalid scheme",
+			hecURL:   "ftp://test.splunk.com",
+			expected: "HEC URL must use http or https scheme",
+		},
+		{
+			name:     "missing host",
+			hecURL:   "https://",
+			expected: "HEC URL must include host",
+		},
+		{
+			name:     "malformed URL",
+			hecURL:   "ht!tp://invalid",
+			expected: "invalid HEC URL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configFile := filepath.Join(tmpDir, "test.yml")
+
+			content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19017"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    splunk:
+      hec_url: "%s"
+      hec_token: "test-token"
+      source_type: "zpa:user:activity"
+`, tmpDir, tt.hecURL)
+
+			if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+				t.Fatalf("failed to create config file: %v", err)
+			}
+
+			_, err := LoadConfig(configFile)
+			if err == nil {
+				t.Fatal("expected error for invalid HEC URL")
+			}
+
+			if !strings.Contains(err.Error(), tt.expected) {
+				t.Errorf("expected error to contain %q, got %q", tt.expected, err.Error())
+			}
+		})
+	}
+}
+
+func TestLoadConfig_HECTokenRequired(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19018"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    splunk:
+      hec_url: "https://test.splunk.com"
+      source_type: "zpa:user:activity"
+`, tmpDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err == nil {
+		t.Fatal("expected error for missing HEC token")
+	}
+
+	if !strings.Contains(err.Error(), "HEC token required") {
+		t.Errorf("expected error about HEC token, got %q", err.Error())
+	}
+}
+
+func TestLoadConfig_HECURLRequired(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19019"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    splunk:
+      hec_token: "test-token"
+      source_type: "zpa:user:activity"
+`, tmpDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err == nil {
+		t.Fatal("expected error for missing HEC URL")
+	}
+
+	if !strings.Contains(err.Error(), "HEC URL required") {
+		t.Errorf("expected error about HEC URL, got %q", err.Error())
+	}
+}
+
+// Test CIDR validation
+func TestLoadConfig_InvalidCIDR(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19020"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    allowed_cidrs: "invalid-cidr"
+    splunk:
+      source_type: "zpa:user:activity"
+`, tmpDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err == nil {
+		t.Fatal("expected error for invalid CIDR")
+	}
+
+	if !strings.Contains(err.Error(), "invalid CIDR") {
+		t.Errorf("expected error about invalid CIDR, got %q", err.Error())
+	}
+}
+
+// Test storage directory validation
+func TestLoadConfig_StorageDirectoryCreated(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+	outputDir := filepath.Join(tmpDir, "new", "nested", "logs")
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: ":19021"
+    log_type: "user-activity"
+    output_dir: "%s"
+    file_prefix: "zpa-test"
+    splunk:
+      source_type: "zpa:user:activity"
+`, outputDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err != nil {
+		t.Fatalf("LoadConfig should succeed and create directory: %v", err)
+	}
+
+	// Verify directory was created
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		t.Error("expected output directory to be created")
+	}
+}
+
+// Test listen address validation
+func TestLoadConfig_ListenAddressInUse(t *testing.T) {
+	// Start a listener to occupy a port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create test listener: %v", err)
+	}
+	defer listener.Close()
+
+	addr := listener.Addr().String()
+
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	content := fmt.Sprintf(`listeners:
+  - name: "test"
+    listen_addr: "%s"
+    log_type: "user-activity"
+    output_dir: "%s/logs"
+    file_prefix: "zpa-test"
+    splunk:
+      source_type: "zpa:user:activity"
+`, addr, tmpDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err = LoadConfig(configFile)
+	if err == nil {
+		t.Fatal("expected error for address already in use")
+	}
+
+	if !strings.Contains(err.Error(), "cannot bind to listen address") {
+		t.Errorf("expected error about binding to address, got %q", err.Error())
+	}
+}
+
+// Test global and per-listener HEC config merge
+func TestLoadConfig_GlobalAndPerListenerHEC(t *testing.T) {
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "test.yml")
+
+	content := fmt.Sprintf(`splunk:
+  hec_url: "https://global.splunk.com"
+  hec_token: "global-token"
+
+listeners:
+  - name: "listener1"
+    listen_addr: ":19022"
+    log_type: "user-activity"
+    output_dir: "%s/logs1"
+    file_prefix: "zpa-listener1"
+    splunk:
+      source_type: "zpa:user:activity"
+  - name: "listener2"
+    listen_addr: ":19023"
+    log_type: "user-status"
+    output_dir: "%s/logs2"
+    file_prefix: "zpa-listener2"
+    splunk:
+      hec_url: "https://listener2.splunk.com"
+      hec_token: "listener2-token"
+      source_type: "zpa:user:status"
+`, tmpDir, tmpDir)
+
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create config file: %v", err)
+	}
+
+	_, err := LoadConfig(configFile)
+	if err != nil {
+		t.Fatalf("LoadConfig should succeed: %v", err)
 	}
 }

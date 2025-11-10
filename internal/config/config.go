@@ -1,11 +1,16 @@
 package config
 
 import (
+	"crypto/tls"
 	_ "embed"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
 
+	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/logtypes"
 	"gopkg.in/yaml.v3"
 )
@@ -132,34 +137,84 @@ func validateConfig(cfg *Config) error {
 		}
 		listenAddrs[listener.ListenAddr] = true
 
-		// Validate TLS configuration (both cert and key must be present or both absent)
+		// Validate listen address availability
+		if err := validateListenAddr(listener.ListenAddr); err != nil {
+			return fmt.Errorf("listener %s: cannot bind to listen address: %w", listener.Name, err)
+		}
+
+		// Validate TLS configuration
 		if listener.TLS != nil {
 			if (listener.TLS.CertFile == "") != (listener.TLS.KeyFile == "") {
 				return fmt.Errorf("listener %s: both tls.cert_file and tls.key_file must be specified or both omitted", listener.Name)
 			}
 			if listener.TLS.CertFile != "" {
-				// Check if cert file exists
-				if _, err := os.Stat(listener.TLS.CertFile); os.IsNotExist(err) {
-					return fmt.Errorf("listener %s: tls.cert_file not found: %s", listener.Name, listener.TLS.CertFile)
+				// Check if cert file exists and is readable
+				if _, err := os.Stat(listener.TLS.CertFile); err != nil {
+					return fmt.Errorf("listener %s: TLS cert file not accessible: %w", listener.Name, err)
 				}
-				// Check if key file exists
-				if _, err := os.Stat(listener.TLS.KeyFile); os.IsNotExist(err) {
-					return fmt.Errorf("listener %s: tls.key_file not found: %s", listener.Name, listener.TLS.KeyFile)
+				// Check if key file exists and is readable
+				if _, err := os.Stat(listener.TLS.KeyFile); err != nil {
+					return fmt.Errorf("listener %s: TLS key file not accessible: %w", listener.Name, err)
+				}
+				// Validate certificate by loading it
+				if _, err := tls.LoadX509KeyPair(listener.TLS.CertFile, listener.TLS.KeyFile); err != nil {
+					return fmt.Errorf("listener %s: failed to load TLS certificate: %w", listener.Name, err)
 				}
 			}
 		}
 
-		// Validate Splunk configuration (requires sourcetype if HEC is configured)
+		// Validate storage directory (create if needed and test writability)
+		if err := validateStorageDir(listener.OutputDir); err != nil {
+			return fmt.Errorf("listener %s: %w", listener.Name, err)
+		}
+
+		// Validate CIDR list
+		if listener.AllowedCIDRs != "" {
+			if _, err := acl.New(listener.AllowedCIDRs); err != nil {
+				return fmt.Errorf("listener %s: invalid CIDR list: %w", listener.Name, err)
+			}
+		}
+
+		// Merge and validate Splunk configuration
+		hecURL := ""
+		hecToken := ""
+		sourceType := ""
+
+		// Start with global config
+		if cfg.Splunk != nil {
+			hecURL = cfg.Splunk.HECURL
+			hecToken = cfg.Splunk.HECToken
+		}
+
+		// Override with per-listener config
 		if listener.Splunk != nil {
-			if listener.Splunk.SourceType == "" && (listener.Splunk.HECURL != "" || listener.Splunk.HECToken != "") {
+			if listener.Splunk.HECURL != "" {
+				hecURL = listener.Splunk.HECURL
+			}
+			if listener.Splunk.HECToken != "" {
+				hecToken = listener.Splunk.HECToken
+			}
+			if listener.Splunk.SourceType != "" {
+				sourceType = listener.Splunk.SourceType
+			}
+		}
+
+		// Validate HEC configuration
+		if hecURL != "" || hecToken != "" {
+			// Both URL and token must be specified
+			if hecURL == "" {
+				return fmt.Errorf("listener %s: HEC URL required when HEC token is specified", listener.Name)
+			}
+			if hecToken == "" {
+				return fmt.Errorf("listener %s: HEC token required when HEC URL is specified", listener.Name)
+			}
+			if sourceType == "" {
 				return fmt.Errorf("listener %s: splunk.source_type is required when HEC is configured", listener.Name)
 			}
-		} else if cfg.Splunk != nil {
-			// If using global Splunk config, listener must have a sourcetype
-			if cfg.Splunk.HECURL != "" || cfg.Splunk.HECToken != "" {
-				if listener.Splunk == nil || listener.Splunk.SourceType == "" {
-					return fmt.Errorf("listener %s: splunk.source_type is required when global HEC is configured", listener.Name)
-				}
+
+			// Validate HEC URL format
+			if err := validateHECURL(hecURL); err != nil {
+				return fmt.Errorf("listener %s: invalid HEC URL: %w", listener.Name, err)
 			}
 		}
 
@@ -167,6 +222,53 @@ func validateConfig(cfg *Config) error {
 		if listener.MaxLineBytes == 0 {
 			cfg.Listeners[i].MaxLineBytes = DefaultMaxLineBytes
 		}
+	}
+
+	return nil
+}
+
+// validateListenAddr verifies that the listen address is valid and available
+func validateListenAddr(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	ln.Close()
+	return nil
+}
+
+// validateStorageDir ensures the storage directory exists and is writable
+func validateStorageDir(dir string) error {
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("cannot create output directory: %w", err)
+	}
+
+	// Verify directory is writable by creating a temp file
+	testFile := filepath.Join(dir, ".writetest")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		return fmt.Errorf("output directory not writable: %w", err)
+	}
+	os.Remove(testFile)
+
+	return nil
+}
+
+// validateHECURL validates the HEC URL format
+func validateHECURL(hecURL string) error {
+	u, err := url.Parse(hecURL)
+	if err != nil {
+		return err
+	}
+
+	// Must be HTTP/HTTPS
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("HEC URL must use http or https scheme")
+	}
+
+	// Host must be specified
+	if u.Host == "" {
+		return fmt.Errorf("HEC URL must include host")
 	}
 
 	return nil
