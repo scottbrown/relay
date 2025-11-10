@@ -296,6 +296,57 @@ The integration tests validate:
 
 For detailed information about the integration test harness, see [TESTING.SPEC.md](TESTING.SPEC.md).
 
+### Performance Benchmarks
+
+The project includes comprehensive benchmarks for critical performance paths to help identify bottlenecks and prevent regressions.
+
+**Running Benchmarks:**
+
+```bash
+# Using Task runner (recommended)
+task bench
+
+# Or directly with Go
+go test -bench=. -benchmem -run=^$ ./internal/...
+
+# Run specific package benchmarks
+go test -bench=. -benchmem ./internal/processor/
+go test -bench=. -benchmem ./internal/storage/
+go test -bench=. -benchmem ./internal/forwarder/
+go test -bench=. -benchmem ./internal/server/
+
+# Save baseline for comparison
+go test -bench=. -benchmem ./internal/... > baseline.txt
+
+# Compare with previous baseline using benchstat
+go install golang.org/x/perf/cmd/benchstat@latest
+benchstat baseline.txt new.txt
+```
+
+**Benchmark Coverage:**
+
+The benchmarks validate performance of:
+- **Processor Package**: Line reading with various sizes (100B to 1MB), JSON validation, oversized line handling
+- **Storage Package**: Write operations with different payload sizes, concurrent writes, file rotation logic
+- **Forwarder Package**: HEC forwarding with/without gzip, different payload sizes, retry logic overhead
+- **Server Package**: End-to-end connection handling with various scenarios
+
+**Interpreting Results:**
+
+Benchmark results show:
+- **ns/op**: Nanoseconds per operation (lower is better)
+- **B/op**: Bytes allocated per operation (lower is better)
+- **allocs/op**: Number of allocations per operation (lower is better)
+- **MB/s**: Throughput in megabytes per second (when applicable, higher is better)
+
+**Example Output:**
+
+```
+BenchmarkReadLineLimited_Small-8       1000000    1234 ns/op    512 B/op    4 allocs/op
+BenchmarkWrite_Medium-8                 500000    2345 ns/op   1024 B/op    2 allocs/op
+BenchmarkForward_Large_Gzip-8           100000   12345 ns/op   2048 B/op    8 allocs/op
+```
+
 ### Dependencies
 
 - `gopkg.in/yaml.v3` - YAML configuration parsing
