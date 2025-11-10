@@ -7,5 +7,7 @@ func init() {
 
 	// Root command flags
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "f", "", "Path to configuration file (required)")
-	rootCmd.MarkPersistentFlagRequired("config")
+	if err := rootCmd.MarkPersistentFlagRequired("config"); err != nil {
+		panic("failed to mark config flag as required: " + err.Error())
+	}
 }

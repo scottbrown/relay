@@ -31,6 +31,8 @@ func LoadFixtureBytes(t *testing.T, name string) []byte {
 	t.Helper()
 
 	path := FixturePath(name)
+	// #nosec G304 -- FixturePath() builds paths relative to the spec/ directory for test
+	// fixtures. This is a test utility and the fixture names are controlled by the tests.
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to load fixture %s: %v", name, err)

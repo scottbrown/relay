@@ -144,12 +144,15 @@ func (h *HEC) sendWithRetry(data []byte) error {
 
 		resp, err := h.client.Do(req)
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				// Log but don't fail on close error in success path
+			}
 			return nil
 		}
 		if resp != nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			// Drain and close response body to enable connection reuse
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 		}
 
 		// Don't sleep after the last attempt

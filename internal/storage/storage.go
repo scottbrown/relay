@@ -32,7 +32,9 @@ func (m *Manager) Write(data []byte) error {
 
 	if day != m.curDay {
 		if m.file != nil {
-			m.file.Close()
+			if err := m.file.Close(); err != nil {
+				return err
+			}
 		}
 
 		var err error
@@ -53,7 +55,8 @@ func (m *Manager) Close() error {
 	if m.file != nil {
 		// Sync to ensure all data is flushed to disk
 		if err := m.file.Sync(); err != nil {
-			m.file.Close()
+			// Try to close the file even if sync failed
+			_ = m.file.Close()
 			return err
 		}
 		return m.file.Close()
@@ -71,9 +74,11 @@ func (m *Manager) CurrentFile() string {
 
 func (m *Manager) openDayFile(day string) (*os.File, error) {
 	path := filepath.Join(m.baseDir, m.filePrefix+"-"+day+".ndjson")
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// #nosec G304 -- baseDir and filePrefix are set during Manager construction from config.
+	// The day parameter is generated from time.Now() and used for daily log rotation.
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 }
 
 func ensureDir(dir string) error {
-	return os.MkdirAll(dir, 0755)
+	return os.MkdirAll(dir, 0700)
 }

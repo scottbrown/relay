@@ -107,7 +107,7 @@ func (m *MockHECServer) handler(w http.ResponseWriter, r *http.Request) {
 		if hj, ok := w.(http.Hijacker); ok {
 			conn, _, err := hj.Hijack()
 			if err == nil {
-				conn.Close()
+				_ = conn.Close() // Ignore close error in test mock
 				return
 			}
 		}

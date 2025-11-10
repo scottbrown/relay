@@ -62,7 +62,9 @@ func (s *Server) acceptLoop() {
 			}
 
 			// Immediately close the connection (complete handshake only)
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				// Ignore close errors for health check connections
+			}
 		}
 	}
 }

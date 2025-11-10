@@ -85,6 +85,9 @@ func (c *MockZPAClient) Connect(ctx context.Context) error {
 
 	if c.UseTLS {
 		if c.TLSConfig == nil {
+			// #nosec G402 -- InsecureSkipVerify is acceptable here because this is a test utility
+			// that needs to connect to relay servers with self-signed certificates. This code is
+			// never used in production and is isolated to the internal/testutil package.
 			c.TLSConfig = &tls.Config{
 				InsecureSkipVerify: true, // For testing only
 			}

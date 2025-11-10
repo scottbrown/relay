@@ -66,6 +66,8 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	// Read config file
+	// #nosec G304 -- configFile is provided by the user via the --config flag, which is the
+	// expected and documented way to specify the configuration file path.
 	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %v", err)

@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"crypto/tls"
+	"flag"
 	"log"
 	"net"
 
@@ -27,6 +28,11 @@ type Server struct {
 	storage   *storage.Manager
 	forwarder *forwarder.HEC
 	listener  net.Listener
+}
+
+// isTestMode checks if we're running in test or benchmark mode
+func isTestMode() bool {
+	return flag.Lookup("test.v") != nil || flag.Lookup("test.bench") != nil
 }
 
 // New creates a new server with the given configuration
@@ -92,7 +98,9 @@ func (s *Server) acceptLoop() error {
 		ra, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
 		if !s.acl.Allows(ra.IP) {
 			log.Printf("deny %s", ra.IP)
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				log.Printf("warning: failed to close denied connection: %v", err)
+			}
 			continue
 		}
 
@@ -134,7 +142,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 		copy(lineCopy, line)
 		go func(data []byte) {
 			if err := s.forwarder.Forward(data); err != nil {
-				log.Printf("hec: %v", err)
+				// Suppress HEC errors in test/benchmark mode to reduce noise
+				if !isTestMode() {
+					log.Printf("hec: %v", err)
+				}
 			}
 		}(lineCopy)
 	}

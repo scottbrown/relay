@@ -116,7 +116,9 @@ func NewRelayInstance(t *testing.T, opts ...Option) *RelayInstance {
 		t.Fatalf("Failed to allocate port: %v", err)
 	}
 	listenAddr := listener.Addr().String()
-	listener.Close()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("Failed to close port allocator: %v", err)
+	}
 
 	instance := &RelayInstance{
 		ListenAddr:   listenAddr,
@@ -160,6 +162,8 @@ func (r *RelayInstance) Start() error {
 	binaryPath := filepath.Join(projectRoot, ".build", "relay")
 
 	// Prepare command
+	// #nosec G204 -- binaryPath is derived from the project root (go.mod location) which is
+	// controlled and not user input. This is a test utility for launching the relay binary.
 	r.cmd = exec.Command(binaryPath, "--config", configFile)
 
 	r.stdout = &bytes.Buffer{}
@@ -185,7 +189,7 @@ func (r *RelayInstance) WaitForReady(timeout time.Duration) error {
 		// Try to connect
 		conn, err := net.DialTimeout("tcp", r.ListenAddr, 100*time.Millisecond)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close() // Ignore close error in test utility
 			return nil
 		}
 
@@ -213,7 +217,7 @@ func (r *RelayInstance) Stop() error {
 	// Send interrupt signal
 	if err := r.cmd.Process.Signal(os.Interrupt); err != nil {
 		// If interrupt fails, try kill
-		r.cmd.Process.Kill()
+		_ = r.cmd.Process.Kill() // Ignore error from kill
 	}
 
 	// Wait for process to exit (with timeout)
@@ -226,7 +230,7 @@ func (r *RelayInstance) Stop() error {
 	case <-done:
 		return nil
 	case <-time.After(5 * time.Second):
-		r.cmd.Process.Kill()
+		_ = r.cmd.Process.Kill() // Ignore error from forced kill
 		return fmt.Errorf("timeout waiting for relay to stop, killed")
 	}
 }
@@ -269,6 +273,8 @@ func (r *RelayInstance) ReadStorageFile(filename string) ([]string, error) {
 	r.t.Helper()
 
 	path := filepath.Join(r.StorageDir, filename)
+	// #nosec G304 -- filename is controlled by the test and StorageDir is a temp directory
+	// created by testing.T.TempDir(). This is a test utility for reading test output files.
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -335,7 +341,7 @@ func (r *RelayInstance) generateConfigFile() (string, error) {
 
 	// Write to temp file
 	configFile := filepath.Join(r.t.TempDir(), "relay-config.yml")
-	if err := os.WriteFile(configFile, yamlBytes, 0644); err != nil {
+	if err := os.WriteFile(configFile, yamlBytes, 0600); err != nil {
 		return "", fmt.Errorf("failed to write config file: %w", err)
 	}
 

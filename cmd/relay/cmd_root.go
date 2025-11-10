@@ -107,7 +107,9 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	// Cleanup storage managers on exit
 	defer func() {
 		for _, mgr := range storageManagers {
-			mgr.Close()
+			if err := mgr.Close(); err != nil {
+				log.Printf("warning: failed to close storage manager: %v", err)
+			}
 		}
 	}()
 
@@ -138,12 +140,16 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		}
 		// If any server fails, stop all
 		for _, srv := range servers {
-			srv.Stop()
+			if err := srv.Stop(); err != nil {
+				log.Printf("warning: failed to stop server: %v", err)
+			}
 		}
 	case sig := <-sigCh:
 		log.Printf("received %s, shutting down", sig)
 		for _, srv := range servers {
-			srv.Stop()
+			if err := srv.Stop(); err != nil {
+				log.Printf("warning: failed to stop server: %v", err)
+			}
 		}
 	}
 }
