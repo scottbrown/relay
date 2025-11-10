@@ -3,6 +3,7 @@ package storage
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type Manager struct {
 	filePrefix string
 	file       *os.File
 	curDay     string
+	mu         sync.Mutex
 }
 
 // New creates a new storage manager for the given directory with the specified file prefix
@@ -28,6 +30,9 @@ func New(baseDir, filePrefix string) (*Manager, error) {
 
 // Write writes data to the current day's file, rotating if necessary
 func (m *Manager) Write(data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	day := time.Now().UTC().Format("2006-01-02")
 
 	if day != m.curDay {
@@ -52,6 +57,9 @@ func (m *Manager) Write(data []byte) error {
 
 // Close closes the current file
 func (m *Manager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.file != nil {
 		// Sync to ensure all data is flushed to disk
 		if err := m.file.Sync(); err != nil {
@@ -66,6 +74,9 @@ func (m *Manager) Close() error {
 
 // CurrentFile returns the path to the current day's file
 func (m *Manager) CurrentFile() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.curDay == "" {
 		return ""
 	}

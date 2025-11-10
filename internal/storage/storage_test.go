@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -351,4 +353,63 @@ func TestCustomFilePrefix(t *testing.T) {
 	if currentPath != expectedPath {
 		t.Errorf("expected path %q, got %q", expectedPath, currentPath)
 	}
+}
+
+func TestConcurrentWrites(t *testing.T) {
+	tmpDir := t.TempDir()
+	manager, err := New(tmpDir, "zpa")
+	if err != nil {
+		t.Fatalf("failed to create manager: %v", err)
+	}
+	defer manager.Close()
+
+	const numGoroutines = 100
+	const writesPerGoroutine = 100
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Track errors from goroutines
+	errCh := make(chan error, numGoroutines*writesPerGoroutine)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < writesPerGoroutine; j++ {
+				data := []byte(fmt.Sprintf(`{"goroutine":%d,"write":%d}`, id, j))
+				if err := manager.Write(data); err != nil {
+					errCh <- fmt.Errorf("goroutine %d write %d failed: %w", id, j, err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	// Check for errors
+	for err := range errCh {
+		t.Error(err)
+	}
+
+	// Verify file was created and is accessible
+	currentFile := manager.CurrentFile()
+	if currentFile == "" {
+		t.Fatal("current file should not be empty after writes")
+	}
+
+	info, err := os.Stat(currentFile)
+	if err != nil {
+		t.Fatalf("failed to stat current file: %v", err)
+	}
+
+	// Verify file has non-zero size
+	if info.Size() == 0 {
+		t.Error("file should not be empty after concurrent writes")
+	}
+
+	// Expected minimum size: each line is at least the JSON length + newline
+	// For simplicity, just verify the file exists and has some content
+	expectedWrites := numGoroutines * writesPerGoroutine
+	t.Logf("Successfully wrote %d lines from %d concurrent goroutines", expectedWrites, numGoroutines)
 }
