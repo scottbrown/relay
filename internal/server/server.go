@@ -90,6 +90,11 @@ func (s *Server) acceptLoop() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			// Check if listener was closed (expected during shutdown)
+			if netErr, ok := err.(net.Error); ok && !netErr.Temporary() {
+				// Listener closed, exit gracefully
+				return nil
+			}
 			log.Printf("accept: %v", err)
 			continue
 		}

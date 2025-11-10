@@ -288,3 +288,49 @@ func TestMockZPAClient_Close(t *testing.T) {
 		t.Error("Expected connection to be nil after close")
 	}
 }
+
+func TestWithVerbose(t *testing.T) {
+	client := New("127.0.0.1:9999", WithVerbose(true))
+
+	if !client.verbose {
+		t.Error("Expected verbose to be true with WithVerbose option")
+	}
+}
+
+func TestInvalidUTF8(t *testing.T) {
+	line := InvalidUTF8()
+
+	// Should contain invalid UTF-8 bytes
+	if len(line) == 0 {
+		t.Error("Expected non-empty line with invalid UTF-8")
+	}
+
+	// Should have JSON-like structure but with invalid UTF-8
+	if !strings.Contains(line, "{") {
+		t.Error("Expected line to contain '{'")
+	}
+}
+
+func TestMockZPAClient_SendLineWithoutConnection(t *testing.T) {
+	client := New("127.0.0.1:9999")
+
+	// Try to send line without connecting
+	err := client.SendLine("test")
+	if err == nil {
+		t.Error("Expected error when sending line without connection")
+	}
+}
+
+func TestMockZPAClient_ConnectTimeout(t *testing.T) {
+	// Use an address that will timeout
+	client := New("192.0.2.1:9999") // TEST-NET-1, should not be routable
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := client.Connect(ctx)
+	if err == nil {
+		t.Error("Expected error when connecting to unreachable address")
+	}
+}

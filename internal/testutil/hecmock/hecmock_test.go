@@ -248,6 +248,78 @@ func TestMockHECServer_ConcurrentRequests(t *testing.T) {
 	}
 }
 
+func TestNewVerboseMockHECServer(t *testing.T) {
+	server := NewVerboseMockHECServer("test-token-verbose")
+	defer server.Close()
+
+	if !server.verbose {
+		t.Error("Expected verbose to be true for NewVerboseMockHECServer")
+	}
+
+	// Send a request to verify it works
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/services/collector/raw", strings.NewReader("test line"))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", "Splunk test-token-verbose")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestMockHECServer_ResponseDrop(t *testing.T) {
+	server := NewMockHECServer("test-token-drop")
+	defer server.Close()
+
+	server.SetResponse(ResponseDrop)
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/services/collector/raw", strings.NewReader("test"))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", "Splunk test-token-drop")
+
+	// This should fail because the connection is dropped
+	client := &http.Client{
+		Timeout: 1 * time.Second,
+	}
+	_, err = client.Do(req)
+	if err == nil {
+		t.Error("Expected error when connection is dropped, got nil")
+	}
+}
+
+func TestMockHECServer_MissingAuth(t *testing.T) {
+	server := NewMockHECServer("test-token")
+	defer server.Close()
+
+	// Send request without authorisation header
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/services/collector/raw", strings.NewReader("test"))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should return 401 for missing auth
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("Expected status 401 for missing auth, got %d", resp.StatusCode)
+	}
+}
+
 // String returns the string representation of ResponseMode for testing
 func (r ResponseMode) String() string {
 	switch r {
