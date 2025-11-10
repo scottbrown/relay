@@ -220,3 +220,10 @@ tasks:
       - task: build
       - task: test
       - task: coverage
+
+  test-suite:
+    desc: Run all tests
+    cmds:
+      - task: test
+      - task: integration
+      - task: bench
