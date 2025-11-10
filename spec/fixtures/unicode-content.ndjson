@@ -1,0 +1,6 @@
+{"LogTimestamp": "Fri May 31 17:35:42 2019","Customer": "Unicode test","Username": "user@example.com","Message": "Hello World"}
+{"LogTimestamp": "Fri May 31 17:35:43 2019","Customer": "Chinese characters","Username": "用户@example.com","Message": "你好世界"}
+{"LogTimestamp": "Fri May 31 17:35:44 2019","Customer": "Emoji test","Username": "user@example.com","Message": "Hello 👋 World 🌍"}
+{"LogTimestamp": "Fri May 31 17:35:45 2019","Customer": "Arabic test","Username": "مستخدم@example.com","Message": "مرحبا بالعالم"}
+{"LogTimestamp": "Fri May 31 17:35:46 2019","Customer": "Mixed scripts","Username": "user123@例え.com","Message": "Test テスト 测试 тест"}
+{"LogTimestamp": "Fri May 31 17:35:47 2019","Customer": "Special chars","Username": "user@example.com","Message": "Symbols: ©®™€¥£¢"}

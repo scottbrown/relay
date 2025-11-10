@@ -253,8 +253,48 @@ task build
 ### Running Tests
 
 ```bash
-go test -v
+# Run unit tests
+go test -v ./...
+
+# Run with coverage
+task coverage
+
+# Run integration tests
+task integration
 ```
+
+### Integration Testing
+
+The project includes a comprehensive integration test harness that validates the complete pipeline without requiring live ZPA App Connectors or Splunk HEC instances.
+
+**Running Integration Tests:**
+
+```bash
+# Using Task runner (recommended)
+task integration
+
+# Or directly with Go
+go test -tags=integration -v ./internal/integration/...
+```
+
+**Test Coverage:**
+
+The integration tests validate:
+- End-to-end data flow (happy path)
+- Malformed JSON handling
+- Oversized line rejection
+- HEC failure and retry logic
+- Gzip compression
+- CIDR-based access control
+
+**Test Infrastructure:**
+
+- Mock ZPA client for streaming NDJSON logs
+- Mock Splunk HEC server with configurable responses
+- Relay launcher for temporary test instances
+- Test fixtures for various scenarios
+
+For detailed information about the integration test harness, see [TESTING.SPEC.md](TESTING.SPEC.md).
 
 ### Dependencies
 

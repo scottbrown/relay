@@ -51,6 +51,11 @@ func (m *Manager) Write(data []byte) error {
 // Close closes the current file
 func (m *Manager) Close() error {
 	if m.file != nil {
+		// Sync to ensure all data is flushed to disk
+		if err := m.file.Sync(); err != nil {
+			m.file.Close()
+			return err
+		}
 		return m.file.Close()
 	}
 	return nil

@@ -1,0 +1,6 @@
+{"LogTimestamp": "Fri May 31 17:35:42 2019","Customer": "Valid Line","SessionID": "ABC123"}
+{"LogTimestamp": "Fri May 31 17:35:43 2019","Customer": "Missing closing brace"
+{"LogTimestamp": "Fri May 31 17:35:44 2019","Customer": "Valid again","SessionID": "DEF456"}
+{invalid json without quotes}
+{"LogTimestamp": "Fri May 31 17:35:45 2019","Customer": "Another valid","SessionID": "GHI789"}
+{"LogTimestamp": "Fri May 31 17:35:46 2019","Customer": "Truncated"
