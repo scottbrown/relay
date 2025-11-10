@@ -91,6 +91,12 @@ tasks:
       COVERAGE_FILE: "{{.TEST_DIR}}/coverage.out"
       COVERAGE_HTML: "{{.TEST_DIR}}/coverage.html"
 
+  integration:
+    desc: Run integration tests
+    deps: [build]
+    cmds:
+      - go test -tags=integration -timeout=2m -v ./internal/integration/...
+
   release:
     desc: Build release artifacts for multiple platforms
     cmds:

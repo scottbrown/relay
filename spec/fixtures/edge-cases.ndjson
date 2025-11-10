@@ -1,0 +1,13 @@
+{"LogTimestamp": "Fri May 31 17:35:42 2019","Customer": "Normal line"}
+
+{"LogTimestamp": "Fri May 31 17:35:43 2019","Customer": "After blank line"}
+{"LogTimestamp": "Fri May 31 17:35:44 2019","Customer": "Line with escaped quotes","Message": "She said \"hello\""}
+{"LogTimestamp": "Fri May 31 17:35:45 2019","Customer": "Line with newline in value","Message": "First line\nSecond line"}
+{"LogTimestamp": "Fri May 31 17:35:46 2019","Customer": "Line with tab","Message": "Column1\tColumn2"}
+{"LogTimestamp": "Fri May 31 17:35:47 2019","Customer": "Very minimal","ID": 1}
+{"LogTimestamp": "Fri May 31 17:35:48 2019","Customer": "Nested object","Data": {"nested": {"deeply": {"value": "here"}}}}
+{"LogTimestamp": "Fri May 31 17:35:49 2019","Customer": "Array field","Tags": ["tag1", "tag2", "tag3"]}
+{"LogTimestamp": "Fri May 31 17:35:50 2019","Customer": "Null values","OptionalField": null}
+{"LogTimestamp": "Fri May 31 17:35:51 2019","Customer": "Boolean fields","Active": true,"Deleted": false}
+{"LogTimestamp": "Fri May 31 17:35:52 2019","Customer": "Large numbers","Count": 9223372036854775807}
+{"LogTimestamp": "Fri May 31 17:35:53 2019","Customer": "Float numbers","Latitude": 45.123456789}

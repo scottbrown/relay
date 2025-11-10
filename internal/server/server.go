@@ -108,10 +108,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 	for {
 		line, err := processor.ReadLineLimited(br, s.config.MaxLineBytes)
 		if err != nil {
-			if err.Error() != "EOF" {
-				log.Printf("read: %v", err)
+			// Only exit on EOF - other errors (like oversized lines) should just skip the line
+			if err.Error() == "EOF" {
+				return
 			}
-			return
+			log.Printf("read: %v", err)
+			continue
 		}
 
 		// Validate JSON
@@ -126,9 +128,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 			log.Printf("write: %v", err)
 		}
 
-		// Forward to HEC
-		if err := s.forwarder.Forward(line); err != nil {
-			log.Printf("hec: %v", err)
-		}
+		// Forward to HEC asynchronously to avoid blocking the read loop
+		// Make a copy of the line to avoid data races
+		lineCopy := make([]byte, len(line))
+		copy(lineCopy, line)
+		go func(data []byte) {
+			if err := s.forwarder.Forward(data); err != nil {
+				log.Printf("hec: %v", err)
+			}
+		}(lineCopy)
 	}
 }

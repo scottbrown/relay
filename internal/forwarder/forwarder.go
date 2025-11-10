@@ -101,7 +101,8 @@ func (h *HEC) getHealthURL() string {
 }
 
 func (h *HEC) sendWithRetry(data []byte) error {
-	var body io.Reader = bytes.NewReader(data)
+	// Pre-compress data if gzip is enabled
+	var payloadData []byte
 	var contentEnc string
 
 	if h.config.UseGzip {
@@ -113,30 +114,34 @@ func (h *HEC) sendWithRetry(data []byte) error {
 		if err := zw.Close(); err != nil {
 			return err
 		}
-		body = &buf
+		payloadData = buf.Bytes()
 		contentEnc = "gzip"
-	}
-
-	req, err := http.NewRequest("POST", h.config.URL, body)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Authorization", "Splunk "+h.config.Token)
-	req.Header.Set("Content-Type", "text/plain")
-	if contentEnc != "" {
-		req.Header.Set("Content-Encoding", contentEnc)
-	}
-
-	// Add sourcetype to query parameters if specified
-	if h.config.SourceType != "" {
-		q := req.URL.Query()
-		q.Set("sourcetype", h.config.SourceType)
-		req.URL.RawQuery = q.Encode()
+	} else {
+		payloadData = data
 	}
 
 	// Retry logic with exponential backoff
 	for i := 0; i < 5; i++ {
+		// Create a fresh request for each attempt to avoid body reuse issues
+		body := bytes.NewReader(payloadData)
+		req, err := http.NewRequest("POST", h.config.URL, body)
+		if err != nil {
+			return err
+		}
+
+		req.Header.Set("Authorization", "Splunk "+h.config.Token)
+		req.Header.Set("Content-Type", "text/plain")
+		if contentEnc != "" {
+			req.Header.Set("Content-Encoding", contentEnc)
+		}
+
+		// Add sourcetype to query parameters if specified
+		if h.config.SourceType != "" {
+			q := req.URL.Query()
+			q.Set("sourcetype", h.config.SourceType)
+			req.URL.RawQuery = q.Encode()
+		}
+
 		resp, err := h.client.Do(req)
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			resp.Body.Close()
@@ -147,7 +152,10 @@ func (h *HEC) sendWithRetry(data []byte) error {
 			resp.Body.Close()
 		}
 
-		time.Sleep(time.Duration(250*(1<<i)) * time.Millisecond)
+		// Don't sleep after the last attempt
+		if i < 4 {
+			time.Sleep(time.Duration(250*(1<<i)) * time.Millisecond)
+		}
 	}
 
 	return errors.New("hec send failed after retries")
