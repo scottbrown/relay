@@ -26,7 +26,7 @@ func TestHappyPath(t *testing.T) {
 
 	// Create and start Relay instance
 	relay := relaytest.NewRelayInstance(t,
-		relaytest.WithHEC(hec.URL, "test-token-123", "zscaler:zpa:lss", false),
+		relaytest.WithHEC(hec.URL+"/services/collector/raw", "test-token-123", "zscaler:zpa:lss", false),
 		relaytest.WithLogType("user-activity"),
 	)
 	defer relay.Stop()

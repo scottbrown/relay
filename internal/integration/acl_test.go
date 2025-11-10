@@ -25,7 +25,7 @@ func TestCIDRAccessControl(t *testing.T) {
 	// Create and start Relay instance with CIDR restriction
 	// Allow only localhost connections
 	relay := relaytest.NewRelayInstance(t,
-		relaytest.WithHEC(hec.URL, "test-token-acl", "zscaler:zpa:lss", false),
+		relaytest.WithHEC(hec.URL+"/services/collector/raw", "test-token-acl", "zscaler:zpa:lss", false),
 		relaytest.WithLogType("user-activity"),
 		relaytest.WithAllowedCIDRs("127.0.0.1/32"),
 	)
@@ -108,7 +108,7 @@ func TestCIDRAccessControlAllowAll(t *testing.T) {
 
 	// Create and start Relay instance with no CIDR restriction (allow all)
 	relay := relaytest.NewRelayInstance(t,
-		relaytest.WithHEC(hec.URL, "test-token-acl-all", "zscaler:zpa:lss", false),
+		relaytest.WithHEC(hec.URL+"/services/collector/raw", "test-token-acl-all", "zscaler:zpa:lss", false),
 		relaytest.WithLogType("user-activity"),
 		// No WithAllowedCIDRs means all IPs are allowed
 	)

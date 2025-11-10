@@ -17,6 +17,17 @@ func ReadLineLimited(br *bufio.Reader, limit int) ([]byte, error) {
 		buf.Write(b)
 
 		if len(buf.Bytes()) > limit {
+			// Line exceeds limit - drain the rest until we find a newline
+			// to ensure the next read starts at the correct position
+			if err == nil || !errors.Is(err, io.EOF) {
+				// We have a complete chunk but haven't hit newline yet, keep draining
+				for !bytes.Contains(b, []byte{'\n'}) {
+					b, err = br.ReadBytes('\n')
+					if err != nil {
+						break
+					}
+				}
+			}
 			return nil, errors.New("line exceeds limit")
 		}
 

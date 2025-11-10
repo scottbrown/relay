@@ -24,7 +24,7 @@ func TestOversizedLines(t *testing.T) {
 	// Create and start Relay instance with small max line size
 	maxLineBytes := 1024
 	relay := relaytest.NewRelayInstance(t,
-		relaytest.WithHEC(hec.URL, "test-token-789", "zscaler:zpa:lss", false),
+		relaytest.WithHEC(hec.URL+"/services/collector/raw", "test-token-789", "zscaler:zpa:lss", false),
 		relaytest.WithLogType("user-activity"),
 		relaytest.WithMaxLineBytes(maxLineBytes),
 	)
