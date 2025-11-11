@@ -82,7 +82,7 @@ func TestWrite_FirstWrite(t *testing.T) {
 	defer manager.Close()
 
 	testData := []byte(`{"test": "data"}`)
-	err = manager.Write(testData)
+	err = manager.Write("test-conn-id", testData)
 	if err != nil {
 		t.Fatalf("Write should succeed: %v", err)
 	}
@@ -124,12 +124,12 @@ func TestWrite_MultipleWrites(t *testing.T) {
 	testData1 := []byte(`{"test": "data1"}`)
 	testData2 := []byte(`{"test": "data2"}`)
 
-	err = manager.Write(testData1)
+	err = manager.Write("test-conn-id-1", testData1)
 	if err != nil {
 		t.Fatalf("first Write should succeed: %v", err)
 	}
 
-	err = manager.Write(testData2)
+	err = manager.Write("test-conn-id-2", testData2)
 	if err != nil {
 		t.Fatalf("second Write should succeed: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestWrite_DayRotation(t *testing.T) {
 
 	// Write initial data
 	testData1 := []byte(`{"test": "data1"}`)
-	err = manager.Write(testData1)
+	err = manager.Write("test-conn-id-1", testData1)
 	if err != nil {
 		t.Fatalf("first Write should succeed: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestWrite_DayRotation(t *testing.T) {
 
 	// Write more data - should trigger rotation
 	testData2 := []byte(`{"test": "data2"}`)
-	err = manager.Write(testData2)
+	err = manager.Write("test-conn-id-2", testData2)
 	if err != nil {
 		t.Fatalf("Write after rotation should succeed: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestCurrentFile(t *testing.T) {
 
 	// After first write, should return current file path
 	testData := []byte(`{"test": "data"}`)
-	err = manager.Write(testData)
+	err = manager.Write("test-conn-id", testData)
 	if err != nil {
 		t.Fatalf("Write should succeed: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestClose_WithFile(t *testing.T) {
 
 	// Write to open a file
 	testData := []byte(`{"test": "data"}`)
-	err = manager.Write(testData)
+	err = manager.Write("test-conn-id", testData)
 	if err != nil {
 		t.Fatalf("Write should succeed: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestCustomFilePrefix(t *testing.T) {
 
 	// Write test data
 	testData := []byte(`{"test": "data"}`)
-	err = manager.Write(testData)
+	err = manager.Write("test-conn-id", testData)
 	if err != nil {
 		t.Fatalf("Write should succeed: %v", err)
 	}
@@ -377,7 +377,8 @@ func TestConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < writesPerGoroutine; j++ {
 				data := []byte(fmt.Sprintf(`{"goroutine":%d,"write":%d}`, id, j))
-				if err := manager.Write(data); err != nil {
+				connID := fmt.Sprintf("test-conn-%d-%d", id, j)
+				if err := manager.Write(connID, data); err != nil {
 					errCh <- fmt.Errorf("goroutine %d write %d failed: %w", id, j, err)
 				}
 			}

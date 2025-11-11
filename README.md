@@ -397,6 +397,50 @@ The JSON output format integrates easily with log aggregation tools:
 ./relay --config config.yml 2>&1 | your-log-forwarder
 ```
 
+### Request Tracing with Correlation IDs
+
+Every incoming connection is assigned a unique correlation ID (UUID v4) that tracks the request through the entire processing pipeline. This enables end-to-end tracing and debugging of individual connections.
+
+**How It Works:**
+
+1. When a connection is accepted, a unique correlation ID is generated
+2. The ID is included in all log messages for that connection
+3. The ID is sent as an HTTP header (`X-Correlation-ID`) when forwarding to Splunk HEC
+4. This enables correlation between relay logs and Splunk ingestion logs
+
+**Example Log Output:**
+
+```json
+{"time":"2025-11-11T10:15:45.678Z","level":"INFO","msg":"connection accepted","conn_id":"550e8400-e29b-41d4-a716-446655440000","client_addr":"10.0.1.5:54321"}
+{"time":"2025-11-11T10:15:45.679Z","level":"DEBUG","msg":"stored line","conn_id":"550e8400-e29b-41d4-a716-446655440000","bytes":1024}
+{"time":"2025-11-11T10:15:45.680Z","level":"DEBUG","msg":"forwarding to HEC","conn_id":"550e8400-e29b-41d4-a716-446655440000","hec_url":"https://splunk.example.com:8088/services/collector/raw"}
+{"time":"2025-11-11T10:15:45.750Z","level":"DEBUG","msg":"HEC forward succeeded","conn_id":"550e8400-e29b-41d4-a716-446655440000","status":200}
+{"time":"2025-11-11T10:15:48.123Z","level":"DEBUG","msg":"connection closed","conn_id":"550e8400-e29b-41d4-a716-446655440000","client_addr":"10.0.1.5:54321"}
+```
+
+**Tracing a Specific Connection:**
+
+Use `grep` to trace the entire lifecycle of a connection:
+
+```bash
+# Trace all activity for a specific connection ID
+grep '550e8400-e29b-41d4-a716-446655440000' relay.log
+
+# Using jq for structured filtering
+jq 'select(.conn_id == "550e8400-e29b-41d4-a716-446655440000")' relay.log
+
+# Find all connections from a specific client
+jq 'select(.client_addr == "10.0.1.5:54321")' relay.log
+```
+
+**Benefits:**
+
+- Trace individual connections through the entire pipeline
+- Correlate relay logs with Splunk HEC ingestion logs
+- Debug specific connection issues without noise from other connections
+- Monitor connection lifecycle (accept → validate → store → forward → close)
+- Identify performance bottlenecks for specific requests
+
 ## Development
 
 ### Prerequisites

@@ -29,7 +29,7 @@ func BenchmarkForward_Small_NoGzip(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -54,7 +54,7 @@ func BenchmarkForward_Small_Gzip(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -79,7 +79,7 @@ func BenchmarkForward_Medium_NoGzip(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -104,7 +104,7 @@ func BenchmarkForward_Medium_Gzip(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -129,7 +129,7 @@ func BenchmarkForward_Large_NoGzip(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -154,7 +154,7 @@ func BenchmarkForward_Large_Gzip(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -186,7 +186,7 @@ func BenchmarkForward_WithRetry(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := hec.Forward(data); err != nil {
+		if err := hec.Forward("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
