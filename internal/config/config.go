@@ -24,12 +24,22 @@ const (
 //go:embed config.template.yml
 var configTemplate string
 
+// CircuitBreakerConfig represents circuit breaker configuration
+type CircuitBreakerConfig struct {
+	Enabled          *bool `yaml:"enabled"`
+	FailureThreshold int   `yaml:"failure_threshold"`
+	SuccessThreshold int   `yaml:"success_threshold"`
+	Timeout          int   `yaml:"timeout_seconds"`
+	HalfOpenMaxCalls int   `yaml:"half_open_max_calls"`
+}
+
 // SplunkConfig represents Splunk HEC configuration
 type SplunkConfig struct {
-	HECURL     string `yaml:"hec_url"`
-	HECToken   string `yaml:"hec_token"`
-	Gzip       *bool  `yaml:"gzip"`
-	SourceType string `yaml:"source_type"`
+	HECURL         string                `yaml:"hec_url"`
+	HECToken       string                `yaml:"hec_token"`
+	Gzip           *bool                 `yaml:"gzip"`
+	SourceType     string                `yaml:"source_type"`
+	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 }
 
 // TLSConfig represents TLS configuration

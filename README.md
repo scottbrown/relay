@@ -9,6 +9,7 @@ Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log
 - **Data Validation**: JSON validation for incoming log lines
 - **Local Storage**: Daily-rotated NDJSON file persistence with configurable prefixes
 - **Splunk HEC Integration**: Optional real-time forwarding to Splunk's HTTP Event Collector
+- **Circuit Breaker**: Automatic failure detection and recovery for HEC forwarding resilience
 - **TLS Support**: Optional TLS encryption for incoming connections
 - **Access Control**: CIDR-based IP filtering per listener
 - **YAML Configuration**: Required configuration file for all settings
@@ -92,6 +93,13 @@ splunk:
   hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
   hec_token: "your-hec-token-here"
   gzip: true
+  # Circuit breaker configuration for HEC forwarding resilience
+  circuit_breaker:
+    enabled: true                 # Enable/disable circuit breaker (default: true)
+    failure_threshold: 5          # Open circuit after N consecutive failures (default: 5)
+    success_threshold: 2          # Close circuit after N consecutive successes (default: 2)
+    timeout_seconds: 30           # Seconds before testing recovery (default: 30)
+    half_open_max_calls: 1        # Max concurrent test calls in half-open state (default: 1)
 
 # Global healthcheck configuration
 health_check_enabled: true
@@ -135,6 +143,11 @@ listeners:
 | `splunk.hec_url` | Global Splunk HEC raw endpoint URL | No | - |
 | `splunk.hec_token` | Global Splunk HEC authentication token | No | - |
 | `splunk.gzip` | Global gzip compression for HEC | No | - |
+| `splunk.circuit_breaker.enabled` | Enable circuit breaker for HEC | No | `true` |
+| `splunk.circuit_breaker.failure_threshold` | Failures before opening circuit | No | `5` |
+| `splunk.circuit_breaker.success_threshold` | Successes before closing circuit | No | `2` |
+| `splunk.circuit_breaker.timeout_seconds` | Seconds before testing recovery | No | `30` |
+| `splunk.circuit_breaker.half_open_max_calls` | Max concurrent calls in half-open | No | `1` |
 | `health_check_enabled` | Enable healthcheck endpoint | No | `false` |
 | `health_check_addr` | Healthcheck listen address | No | `:9099` |
 
@@ -269,7 +282,55 @@ go run cmd/relay/main.go --config config.yml
 2. **Access Control**: Optional CIDR-based filtering for incoming connections per listener
 3. **Data Validation**: Incoming NDJSON data is validated and line-limited for security
 4. **Local Storage**: Data is persisted locally to daily-rotated files ({file_prefix}-YYYY-MM-DD.ndjson)
-5. **Real-time Forwarding**: Optional concurrent forwarding to Splunk HEC raw endpoint with retry logic
+5. **Real-time Forwarding**: Optional concurrent forwarding to Splunk HEC raw endpoint with retry logic and circuit breaker protection
+
+### Circuit Breaker Pattern
+
+The circuit breaker protects the application from cascading failures when Splunk HEC is down or experiencing issues. It implements a state machine with three states:
+
+**States:**
+
+1. **Closed (Normal Operation)**
+   - All HEC forward attempts proceed normally
+   - Consecutive failures are tracked
+   - Circuit opens after reaching failure threshold (default: 5 failures)
+
+2. **Open (Failing Fast)**
+   - HEC forward attempts are immediately rejected without trying
+   - Logs continue to be stored locally
+   - After timeout period (default: 30s), circuit transitions to half-open
+
+3. **Half-Open (Testing Recovery)**
+   - Limited number of test requests allowed through (default: 1)
+   - If test succeeds: circuit closes and normal operation resumes
+   - If test fails: circuit reopens and timeout restarts
+
+**Example Behaviour:**
+
+```
+# HEC is healthy
+[INFO] forwarding to HEC (state=closed)
+
+# HEC starts failing
+[WARN] HEC forward failed, attempt 1/5
+[WARN] HEC forward failed, attempt 5/5
+[WARN] circuit breaker opened after 5 consecutive failures
+
+# Circuit is open (failing fast, logs still stored locally)
+[WARN] circuit breaker open, skipping HEC forward
+
+# After 30s timeout
+[INFO] circuit breaker half-open, testing recovery
+[INFO] HEC forward successful
+[INFO] circuit breaker closed, HEC recovered
+```
+
+**Benefits:**
+- Prevents wasting resources on doomed requests
+- Enables faster failure detection
+- Automatic recovery when HEC becomes healthy
+- Logs are always stored locally regardless of HEC state
+- Can be disabled by setting `failure_threshold: 0`
 
 ### Event Format
 

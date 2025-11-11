@@ -9,8 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"time"
+
 	"github.com/scottbrown/relay"
 	"github.com/scottbrown/relay/internal/acl"
+	"github.com/scottbrown/relay/internal/circuitbreaker"
 	"github.com/scottbrown/relay/internal/config"
 	"github.com/scottbrown/relay/internal/forwarder"
 	"github.com/scottbrown/relay/internal/healthcheck"
@@ -164,6 +167,7 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		if global.Gzip != nil {
 			cfg.UseGzip = *global.Gzip
 		}
+		cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, nil)
 	}
 
 	// Override with per-listener settings
@@ -180,7 +184,59 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		if perListener.Gzip != nil {
 			cfg.UseGzip = *perListener.Gzip
 		}
+		// Merge circuit breaker config (per-listener can override global)
+		if global != nil {
+			cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, perListener.CircuitBreaker)
+		} else {
+			cfg.CircuitBreaker = mergeCircuitBreakerConfig(nil, perListener.CircuitBreaker)
+		}
 	}
 
 	return cfg
+}
+
+func mergeCircuitBreakerConfig(global, perListener *config.CircuitBreakerConfig) circuitbreaker.Config {
+	// Start with defaults
+	cbCfg := circuitbreaker.DefaultConfig()
+
+	// Apply global settings
+	if global != nil {
+		if global.Enabled != nil && !*global.Enabled {
+			// Disable circuit breaker by setting threshold to 0 (effectively infinite)
+			cbCfg.FailureThreshold = 0
+		}
+		if global.FailureThreshold > 0 {
+			cbCfg.FailureThreshold = global.FailureThreshold
+		}
+		if global.SuccessThreshold > 0 {
+			cbCfg.SuccessThreshold = global.SuccessThreshold
+		}
+		if global.Timeout > 0 {
+			cbCfg.Timeout = time.Duration(global.Timeout) * time.Second
+		}
+		if global.HalfOpenMaxCalls > 0 {
+			cbCfg.HalfOpenMaxCalls = global.HalfOpenMaxCalls
+		}
+	}
+
+	// Override with per-listener settings
+	if perListener != nil {
+		if perListener.Enabled != nil && !*perListener.Enabled {
+			cbCfg.FailureThreshold = 0
+		}
+		if perListener.FailureThreshold > 0 {
+			cbCfg.FailureThreshold = perListener.FailureThreshold
+		}
+		if perListener.SuccessThreshold > 0 {
+			cbCfg.SuccessThreshold = perListener.SuccessThreshold
+		}
+		if perListener.Timeout > 0 {
+			cbCfg.Timeout = time.Duration(perListener.Timeout) * time.Second
+		}
+		if perListener.HalfOpenMaxCalls > 0 {
+			cbCfg.HalfOpenMaxCalls = perListener.HalfOpenMaxCalls
+		}
+	}
+
+	return cbCfg
 }
