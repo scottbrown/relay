@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/scottbrown/relay/internal/config"
@@ -18,7 +17,8 @@ var smokeTestCmd = &cobra.Command{
 		// Load configuration
 		cfg, err := config.LoadConfig(configFile)
 		if err != nil {
-			log.Fatalf("config: %v", err)
+			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+			os.Exit(1)
 		}
 
 		performSmokeTest(cfg)

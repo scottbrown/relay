@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -104,7 +104,7 @@ func LoadConfig(configFile string) (*Config, error) {
 		return nil, err
 	}
 
-	log.Printf("Loaded configuration from: %s", configFile)
+	slog.Info("loaded configuration", "file", configFile)
 	return config, nil
 }
 

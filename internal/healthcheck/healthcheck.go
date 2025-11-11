@@ -1,7 +1,7 @@
 package healthcheck
 
 import (
-	"log"
+	"log/slog"
 	"net"
 )
 
@@ -28,7 +28,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	log.Printf("healthcheck listening on %s", s.addr)
+	slog.Debug("healthcheck server started", "addr", s.addr)
 
 	go s.acceptLoop()
 	return nil
@@ -56,12 +56,13 @@ func (s *Server) acceptLoop() {
 					// Server is stopping, this is expected
 					return
 				default:
-					log.Printf("healthcheck accept error: %v", err)
+					slog.Debug("healthcheck accept error", "error", err)
 					continue
 				}
 			}
 
 			// Immediately close the connection (complete handshake only)
+			slog.Debug("healthcheck request", "client_addr", conn.RemoteAddr().String())
 			if err := conn.Close(); err != nil {
 				// Ignore close errors for health check connections
 			}

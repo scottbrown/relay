@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"flag"
-	"log"
+	"log/slog"
 	"net"
 
 	"github.com/scottbrown/relay/internal/acl"
@@ -65,14 +65,14 @@ func (s *Server) Start() error {
 			return err
 		}
 
-		log.Printf("listening TLS on %s", s.config.ListenAddr)
+		slog.Info("server listening", "addr", s.config.ListenAddr, "tls_enabled", true)
 	} else {
 		s.listener, err = net.Listen("tcp", s.config.ListenAddr)
 		if err != nil {
 			return err
 		}
 
-		log.Printf("listening TCP on %s", s.config.ListenAddr)
+		slog.Info("server listening", "addr", s.config.ListenAddr, "tls_enabled", false)
 	}
 
 	return s.acceptLoop()
@@ -95,16 +95,16 @@ func (s *Server) acceptLoop() error {
 				// Listener closed, exit gracefully
 				return nil
 			}
-			log.Printf("accept: %v", err)
+			slog.Warn("accept error", "error", err)
 			continue
 		}
 
 		// Check ACL
 		ra, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
 		if !s.acl.Allows(ra.IP) {
-			log.Printf("deny %s", ra.IP)
+			slog.Warn("connection denied by ACL", "client_ip", ra.IP.String())
 			if err := conn.Close(); err != nil {
-				log.Printf("warning: failed to close denied connection: %v", err)
+				slog.Warn("failed to close denied connection", "error", err)
 			}
 			continue
 		}
@@ -116,6 +116,9 @@ func (s *Server) acceptLoop() error {
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
+	clientAddr := conn.RemoteAddr().String()
+	slog.Info("connection accepted", "client_addr", clientAddr)
+
 	br := bufio.NewReader(conn)
 
 	for {
@@ -123,22 +126,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if err != nil {
 			// Only exit on EOF - other errors (like oversized lines) should just skip the line
 			if err.Error() == "EOF" {
+				slog.Debug("connection closed", "client_addr", clientAddr)
 				return
 			}
-			log.Printf("read: %v", err)
+			slog.Warn("read error", "client_addr", clientAddr, "error", err)
 			continue
 		}
 
 		// Validate JSON
 		if !processor.IsValidJSON(line) {
-			log.Printf("invalid json from %s: %q", conn.RemoteAddr(),
-				processor.Truncate(line, 200))
+			slog.Warn("invalid JSON", "client_addr", clientAddr, "line", processor.Truncate(line, 200))
 			continue
 		}
 
 		// Store locally
 		if err := s.storage.Write(line); err != nil {
-			log.Printf("write: %v", err)
+			slog.Error("storage write failed", "error", err)
 		}
 
 		// Forward to HEC asynchronously to avoid blocking the read loop
@@ -149,7 +152,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if err := s.forwarder.Forward(data); err != nil {
 				// Suppress HEC errors in test/benchmark mode to reduce noise
 				if !isTestMode() {
-					log.Printf("hec: %v", err)
+					slog.Debug("HEC forward failed", "error", err)
 				}
 			}
 		}(lineCopy)

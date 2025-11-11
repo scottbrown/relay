@@ -10,4 +10,5 @@ func init() {
 	if err := rootCmd.MarkPersistentFlagRequired("config"); err != nil {
 		panic("failed to mark config flag as required: " + err.Error())
 	}
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 }
