@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -309,7 +309,7 @@ func (m *MockHECServer) logEvent(event string, data map[string]interface{}) {
 
 	jsonBytes, err := json.Marshal(logEntry)
 	if err != nil {
-		log.Printf("Failed to marshal log entry: %v", err)
+		slog.Error("failed to marshal log entry", "error", err)
 		return
 	}
 

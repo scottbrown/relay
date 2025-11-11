@@ -261,11 +261,13 @@ Error: listener user-activity: cannot bind to listen address: address already in
 ### Command-Line Options
 
 ```bash
-./relay [command] --config <path>
+./relay [command] --config <path> [--log-level <level>]
 
 Options:
   -f, --config string
         Path to configuration file (required)
+      --log-level string
+        Log level: debug, info, warn, error (default "info")
 ```
 
 ### Running Directly with Go
@@ -338,11 +340,62 @@ Data is forwarded to Splunk HEC as raw JSON events (one per line) without additi
 
 ## Monitoring and Logging
 
-The service logs to stdout and includes:
-- Connection status messages
-- Batch processing information
-- Error conditions
-- Graceful shutdown notifications
+### Structured Logging
+
+The service uses Go's built-in `log/slog` package for structured JSON logging to stderr. This provides consistent, parseable logs with contextual fields for easier debugging and monitoring.
+
+**Log Levels:**
+
+Configure the log level using the `--log-level` flag:
+
+```bash
+./relay --config config.yml --log-level debug
+```
+
+Available levels:
+- `debug`: Detailed diagnostic information (connection details, JSON validation, healthcheck requests)
+- `info`: Normal operational messages (connections, file rotation, HEC forwards) - **default**
+- `warn`: Recoverable issues (retry attempts, validation failures, ACL denials)
+- `error`: Serious problems (storage failures, HEC configuration errors)
+
+**Example Log Output:**
+
+```json
+{"time":"2025-11-11T10:15:30.123Z","level":"INFO","msg":"loaded configuration","file":"config.yml"}
+{"time":"2025-11-11T10:15:30.456Z","level":"INFO","msg":"healthcheck server listening","addr":":9099"}
+{"time":"2025-11-11T10:15:30.789Z","level":"INFO","msg":"initialized listener","listener":"user-activity","log_type":"user-activity","addr":":9015"}
+{"time":"2025-11-11T10:15:31.123Z","level":"INFO","msg":"server listening","addr":":9015","tls_enabled":true}
+{"time":"2025-11-11T10:15:45.678Z","level":"INFO","msg":"connection accepted","client_addr":"10.0.1.5:54321"}
+{"time":"2025-11-11T10:15:46.234Z","level":"WARN","msg":"connection denied by ACL","client_ip":"192.168.1.100"}
+{"time":"2025-11-11T10:15:50.890Z","level":"ERROR","msg":"storage write failed","error":"disk full"}
+```
+
+**Contextual Fields:**
+
+Logs include contextual information for easier filtering and analysis:
+- **Server logs**: `addr`, `tls_enabled`, `client_addr`, `client_ip`
+- **Listener logs**: `listener`, `log_type`
+- **Storage logs**: File paths and bytes written
+- **HEC logs**: URLs, response status, retry attempts
+- **ACL logs**: Client IPs and CIDR match/reject reasons
+
+**Integration with Log Aggregation:**
+
+The JSON output format integrates easily with log aggregation tools:
+
+```bash
+# Send to file
+./relay --config config.yml 2>> relay.log
+
+# Send to journald (systemd)
+./relay --config config.yml  # stderr captured automatically
+
+# Parse with jq
+./relay --config config.yml 2>&1 | jq 'select(.level=="ERROR")'
+
+# Forward to Splunk/ELK
+./relay --config config.yml 2>&1 | your-log-forwarder
+```
 
 ## Development
 

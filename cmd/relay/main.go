@@ -1,11 +1,13 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"os"
 )
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }

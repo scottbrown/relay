@@ -3,12 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
-
 	"time"
 
 	"github.com/scottbrown/relay"
@@ -32,10 +32,41 @@ var rootCmd = &cobra.Command{
 }
 
 func handleRootCmd(cmd *cobra.Command, args []string) {
+	// Initialize structured logging
+	var level slog.Level
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		fmt.Fprintf(os.Stderr, "invalid log level %q, using info\n", logLevel)
+		level = slog.LevelInfo
+	}
+
+	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Convert all timestamps to UTC
+			if a.Key == slog.TimeKey {
+				if t, ok := a.Value.Any().(time.Time); ok {
+					a.Value = slog.TimeValue(t.UTC())
+				}
+			}
+			return a
+		},
+	})
+	slog.SetDefault(slog.New(handler))
+
 	// Load configuration (config file is now required)
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize healthcheck server if enabled
@@ -43,14 +74,16 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	if cfg.HealthCheckEnabled {
 		healthSrv, err = healthcheck.New(cfg.HealthCheckAddr)
 		if err != nil {
-			log.Fatalf("healthcheck: %v", err)
+			slog.Error("failed to create healthcheck server", "error", err)
+			os.Exit(1)
 		}
 		defer healthSrv.Stop()
 
 		if err := healthSrv.Start(); err != nil {
-			log.Fatalf("healthcheck start: %v", err)
+			slog.Error("failed to start healthcheck server", "error", err)
+			os.Exit(1)
 		}
-		log.Printf("Healthcheck server listening on %s", cfg.HealthCheckAddr)
+		slog.Info("healthcheck server listening", "addr", cfg.HealthCheckAddr)
 	}
 
 	// Create servers for each listener
@@ -64,13 +97,15 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		// Initialize ACL
 		aclList, err := acl.New(listenerCfg.AllowedCIDRs)
 		if err != nil {
-			log.Fatalf("[%s] allow-cidrs: %v", listenerCfg.Name, err)
+			slog.Error("failed to initialize ACL", "listener", listenerCfg.Name, "error", err)
+			os.Exit(1)
 		}
 
 		// Initialize storage with file prefix
 		storageMgr, err := storage.New(listenerCfg.OutputDir, listenerCfg.FilePrefix)
 		if err != nil {
-			log.Fatalf("[%s] storage: %v", listenerCfg.Name, err)
+			slog.Error("failed to initialize storage", "listener", listenerCfg.Name, "error", err)
+			os.Exit(1)
 		}
 		storageManagers = append(storageManagers, storageMgr)
 
@@ -79,11 +114,12 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 
 		// Health check for HEC if configured
 		if hecCfg.URL != "" && hecCfg.Token != "" {
-			log.Printf("[%s] Testing Splunk HEC connectivity...", listenerCfg.Name)
+			slog.Info("testing Splunk HEC connectivity", "listener", listenerCfg.Name)
 			if err := hecForwarder.HealthCheck(); err != nil {
-				log.Fatalf("[%s] Splunk HEC health check failed: %v", listenerCfg.Name, err)
+				slog.Error("Splunk HEC health check failed", "listener", listenerCfg.Name, "error", err)
+				os.Exit(1)
 			}
-			log.Printf("[%s] Splunk HEC connectivity verified", listenerCfg.Name)
+			slog.Info("Splunk HEC connectivity verified", "listener", listenerCfg.Name)
 		}
 
 		// Initialize server
@@ -100,18 +136,19 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			MaxLineBytes: listenerCfg.MaxLineBytes,
 		}, aclList, storageMgr, hecForwarder)
 		if err != nil {
-			log.Fatalf("[%s] server: %v", listenerCfg.Name, err)
+			slog.Error("failed to create server", "listener", listenerCfg.Name, "error", err)
+			os.Exit(1)
 		}
 
 		servers = append(servers, srv)
-		log.Printf("[%s] Initialized listener for %s on %s", listenerCfg.Name, listenerCfg.LogType, listenerCfg.ListenAddr)
+		slog.Info("initialized listener", "listener", listenerCfg.Name, "log_type", listenerCfg.LogType, "addr", listenerCfg.ListenAddr)
 	}
 
 	// Cleanup storage managers on exit
 	defer func() {
 		for _, mgr := range storageManagers {
 			if err := mgr.Close(); err != nil {
-				log.Printf("warning: failed to close storage manager: %v", err)
+				slog.Warn("failed to close storage manager", "error", err)
 			}
 		}
 	}()
@@ -121,7 +158,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	for i, srv := range servers {
 		name := cfg.Listeners[i].Name
 		go func(s *server.Server, n string) {
-			log.Printf("[%s] Starting listener...", n)
+			slog.Info("starting listener", "listener", n)
 			if err := s.Start(); err != nil {
 				serverErrCh <- fmt.Errorf("[%s] %w", n, err)
 			} else {
@@ -139,19 +176,19 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	select {
 	case err := <-serverErrCh:
 		if err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Printf("server error: %v", err)
+			slog.Error("server error", "error", err)
 		}
 		// If any server fails, stop all
 		for _, srv := range servers {
 			if err := srv.Stop(); err != nil {
-				log.Printf("warning: failed to stop server: %v", err)
+				slog.Warn("failed to stop server", "error", err)
 			}
 		}
 	case sig := <-sigCh:
-		log.Printf("received %s, shutting down", sig)
+		slog.Info("received signal, shutting down", "signal", sig.String())
 		for _, srv := range servers {
 			if err := srv.Stop(); err != nil {
-				log.Printf("warning: failed to stop server: %v", err)
+				slog.Warn("failed to stop server", "error", err)
 			}
 		}
 	}
