@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -38,13 +39,15 @@ func New(config Config) *HEC {
 }
 
 // Forward sends data to Splunk HEC with retry logic and circuit breaker protection
-func (h *HEC) Forward(data []byte) error {
+func (h *HEC) Forward(connID string, data []byte) error {
 	if h.config.URL == "" || h.config.Token == "" {
 		return nil // HEC forwarding disabled
 	}
 
+	slog.Debug("forwarding to HEC", "conn_id", connID, "hec_url", h.config.URL)
+
 	return h.circuitBreaker.Call(func() error {
-		return h.sendWithRetry(data)
+		return h.sendWithRetry(connID, data)
 	})
 }
 
@@ -107,7 +110,7 @@ func (h *HEC) getHealthURL() string {
 	return baseURL + "/services/collector/health"
 }
 
-func (h *HEC) sendWithRetry(data []byte) error {
+func (h *HEC) sendWithRetry(connID string, data []byte) error {
 	// Pre-compress data if gzip is enabled
 	var payloadData []byte
 	var contentEnc string
@@ -138,6 +141,7 @@ func (h *HEC) sendWithRetry(data []byte) error {
 
 		req.Header.Set("Authorization", "Splunk "+h.config.Token)
 		req.Header.Set("Content-Type", "text/plain")
+		req.Header.Set("X-Correlation-ID", connID)
 		if contentEnc != "" {
 			req.Header.Set("Content-Encoding", contentEnc)
 		}
@@ -154,6 +158,7 @@ func (h *HEC) sendWithRetry(data []byte) error {
 			if err := resp.Body.Close(); err != nil {
 				// Log but don't fail on close error in success path
 			}
+			slog.Debug("HEC forward succeeded", "conn_id", connID, "status", resp.StatusCode)
 			return nil
 		}
 		if resp != nil {

@@ -2,10 +2,13 @@ package server
 
 import (
 	"bufio"
+	"crypto/rand"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/forwarder"
@@ -33,6 +36,17 @@ type Server struct {
 // isTestMode checks if we're running in test or benchmark mode
 func isTestMode() bool {
 	return flag.Lookup("test.v") != nil || flag.Lookup("test.bench") != nil
+}
+
+// generateConnID generates a unique correlation ID (UUID v4) for a connection
+func generateConnID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // New creates a new server with the given configuration
@@ -116,8 +130,9 @@ func (s *Server) acceptLoop() error {
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
+	connID := generateConnID()
 	clientAddr := conn.RemoteAddr().String()
-	slog.Info("connection accepted", "client_addr", clientAddr)
+	slog.Info("connection accepted", "conn_id", connID, "client_addr", clientAddr)
 
 	br := bufio.NewReader(conn)
 
@@ -126,35 +141,35 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if err != nil {
 			// Only exit on EOF - other errors (like oversized lines) should just skip the line
 			if err.Error() == "EOF" {
-				slog.Debug("connection closed", "client_addr", clientAddr)
+				slog.Debug("connection closed", "conn_id", connID, "client_addr", clientAddr)
 				return
 			}
-			slog.Warn("read error", "client_addr", clientAddr, "error", err)
+			slog.Warn("read error", "conn_id", connID, "client_addr", clientAddr, "error", err)
 			continue
 		}
 
 		// Validate JSON
 		if !processor.IsValidJSON(line) {
-			slog.Warn("invalid JSON", "client_addr", clientAddr, "line", processor.Truncate(line, 200))
+			slog.Warn("invalid JSON", "conn_id", connID, "client_addr", clientAddr, "line", processor.Truncate(line, 200))
 			continue
 		}
 
 		// Store locally
-		if err := s.storage.Write(line); err != nil {
-			slog.Error("storage write failed", "error", err)
+		if err := s.storage.Write(connID, line); err != nil {
+			slog.Error("storage write failed", "conn_id", connID, "error", err)
 		}
 
 		// Forward to HEC asynchronously to avoid blocking the read loop
 		// Make a copy of the line to avoid data races
 		lineCopy := make([]byte, len(line))
 		copy(lineCopy, line)
-		go func(data []byte) {
-			if err := s.forwarder.Forward(data); err != nil {
+		go func(data []byte, id string) {
+			if err := s.forwarder.Forward(id, data); err != nil {
 				// Suppress HEC errors in test/benchmark mode to reduce noise
 				if !isTestMode() {
-					slog.Debug("HEC forward failed", "error", err)
+					slog.Debug("HEC forward failed", "conn_id", id, "error", err)
 				}
 			}
-		}(lineCopy)
+		}(lineCopy, connID)
 	}
 }

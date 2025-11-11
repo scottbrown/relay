@@ -383,3 +383,32 @@ func TestHandleConnection_MultipleLines(t *testing.T) {
 		t.Error("storage should have current file after writes")
 	}
 }
+
+func TestGenerateConnID(t *testing.T) {
+	// Test that generateConnID returns a non-empty string
+	connID := generateConnID()
+	if connID == "" {
+		t.Error("generateConnID should return non-empty string")
+	}
+
+	// Test that it generates unique IDs
+	ids := make(map[string]bool)
+	for i := 0; i < 1000; i++ {
+		id := generateConnID()
+		if ids[id] {
+			t.Errorf("generateConnID generated duplicate ID: %s", id)
+		}
+		ids[id] = true
+	}
+
+	// Test UUID format (8-4-4-4-12 hex pattern)
+	// Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	if len(connID) != 36 {
+		t.Errorf("expected UUID length 36, got %d", len(connID))
+	}
+
+	// Check for hyphens in correct positions
+	if connID[8] != '-' || connID[13] != '-' || connID[18] != '-' || connID[23] != '-' {
+		t.Errorf("UUID format incorrect, expected hyphens at positions 8,13,18,23: %s", connID)
+	}
+}

@@ -22,7 +22,7 @@ func BenchmarkWrite_Small(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := mgr.Write(data); err != nil {
+		if err := mgr.Write("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -42,7 +42,7 @@ func BenchmarkWrite_Medium(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := mgr.Write(data); err != nil {
+		if err := mgr.Write("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -62,7 +62,7 @@ func BenchmarkWrite_Large(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := mgr.Write(data); err != nil {
+		if err := mgr.Write("bench-conn-id", data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -90,7 +90,7 @@ func BenchmarkWrite_Concurrent(b *testing.B) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < writesPerWorker; i++ {
-				if err := mgr.Write(data); err != nil {
+				if err := mgr.Write("bench-conn-id", data); err != nil {
 					b.Error(err)
 					return
 				}
@@ -117,7 +117,7 @@ func BenchmarkRotation(b *testing.B) {
 		}
 
 		// Write a single line
-		if err := mgr.Write(data); err != nil {
+		if err := mgr.Write("bench-conn-id", data); err != nil {
 			mgr.Close()
 			b.Fatal(err)
 		}
@@ -138,7 +138,7 @@ func BenchmarkCurrentFile(b *testing.B) {
 	defer mgr.Close()
 
 	// Write once to initialise the current file
-	if err := mgr.Write([]byte("test")); err != nil {
+	if err := mgr.Write("bench-conn-id", []byte("test")); err != nil {
 		b.Fatal(err)
 	}
 

@@ -67,7 +67,7 @@ func TestForward_Disabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hec := New(tt.config)
-			err := hec.Forward([]byte("test data"))
+			err := hec.Forward("test-conn-id", []byte("test data"))
 			if err != nil {
 				t.Errorf("Forward with disabled config should return nil, got %v", err)
 			}
@@ -77,6 +77,7 @@ func TestForward_Disabled(t *testing.T) {
 
 func TestForward_Success(t *testing.T) {
 	testData := []byte(`{"test": "data"}`)
+	testConnID := "test-conn-id-12345"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
@@ -91,6 +92,11 @@ func TestForward_Success(t *testing.T) {
 
 		if contentType := r.Header.Get("Content-Type"); contentType != "text/plain" {
 			t.Errorf("expected content type text/plain, got %q", contentType)
+		}
+
+		// Verify correlation ID header
+		if corrID := r.Header.Get("X-Correlation-ID"); corrID != testConnID {
+			t.Errorf("expected X-Correlation-ID %q, got %q", testConnID, corrID)
 		}
 
 		if sourcetype := r.URL.Query().Get("sourcetype"); sourcetype != "test:type" {
@@ -119,7 +125,7 @@ func TestForward_Success(t *testing.T) {
 	}
 
 	hec := New(config)
-	err := hec.Forward(testData)
+	err := hec.Forward(testConnID, testData)
 	if err != nil {
 		t.Fatalf("Forward should succeed: %v", err)
 	}
@@ -161,7 +167,7 @@ func TestForward_WithGzip(t *testing.T) {
 	}
 
 	hec := New(config)
-	err := hec.Forward(testData)
+	err := hec.Forward("test-conn-id", testData)
 	if err != nil {
 		t.Fatalf("Forward with gzip should succeed: %v", err)
 	}
@@ -185,7 +191,7 @@ func TestForward_Retry(t *testing.T) {
 	}
 
 	hec := New(config)
-	err := hec.Forward([]byte("test data"))
+	err := hec.Forward("test-conn-id", []byte("test data"))
 	if err != nil {
 		t.Fatalf("Forward should succeed after retries: %v", err)
 	}
@@ -207,7 +213,7 @@ func TestForward_RetryFailure(t *testing.T) {
 	}
 
 	hec := New(config)
-	err := hec.Forward([]byte("test data"))
+	err := hec.Forward("test-conn-id", []byte("test data"))
 	if err == nil {
 		t.Fatal("expected error after max retries")
 	}
@@ -393,7 +399,7 @@ func TestSendWithRetry_RequestError(t *testing.T) {
 	}
 
 	hec := New(config)
-	err := hec.sendWithRetry([]byte("test data"))
+	err := hec.sendWithRetry("test-conn-id", []byte("test data"))
 	if err == nil {
 		t.Fatal("expected error for invalid URL")
 	}

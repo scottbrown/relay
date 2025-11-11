@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -29,7 +30,7 @@ func New(baseDir, filePrefix string) (*Manager, error) {
 }
 
 // Write writes data to the current day's file, rotating if necessary
-func (m *Manager) Write(data []byte) error {
+func (m *Manager) Write(connID string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -51,7 +52,10 @@ func (m *Manager) Write(data []byte) error {
 		m.curDay = day
 	}
 
-	_, err := m.file.Write(append(data, '\n'))
+	n, err := m.file.Write(append(data, '\n'))
+	if err == nil {
+		slog.Debug("stored line", "conn_id", connID, "bytes", n)
+	}
 	return err
 }
 
