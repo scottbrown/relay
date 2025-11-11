@@ -8,37 +8,44 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/scottbrown/relay/internal/circuitbreaker"
 )
 
 // Config contains configuration for the Splunk HEC forwarder
 type Config struct {
-	URL        string
-	Token      string
-	SourceType string
-	UseGzip    bool
+	URL            string
+	Token          string
+	SourceType     string
+	UseGzip        bool
+	CircuitBreaker circuitbreaker.Config
 }
 
 // HEC represents a Splunk HTTP Event Collector forwarder
 type HEC struct {
-	config Config
-	client *http.Client
+	config         Config
+	client         *http.Client
+	circuitBreaker *circuitbreaker.CircuitBreaker
 }
 
 // New creates a new HEC forwarder with the given configuration
 func New(config Config) *HEC {
 	return &HEC{
-		config: config,
-		client: &http.Client{Timeout: 15 * time.Second},
+		config:         config,
+		client:         &http.Client{Timeout: 15 * time.Second},
+		circuitBreaker: circuitbreaker.New(config.CircuitBreaker),
 	}
 }
 
-// Forward sends data to Splunk HEC with retry logic
+// Forward sends data to Splunk HEC with retry logic and circuit breaker protection
 func (h *HEC) Forward(data []byte) error {
 	if h.config.URL == "" || h.config.Token == "" {
 		return nil // HEC forwarding disabled
 	}
 
-	return h.sendWithRetry(data)
+	return h.circuitBreaker.Call(func() error {
+		return h.sendWithRetry(data)
+	})
 }
 
 // HealthCheck verifies that the HEC endpoint and token are valid

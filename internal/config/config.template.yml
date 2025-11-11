@@ -6,6 +6,13 @@ splunk:
   hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
   hec_token: "your-hec-token-here"
   gzip: true
+  # Circuit breaker configuration for HEC forwarding resilience
+  circuit_breaker:
+    enabled: true                 # Enable/disable circuit breaker (default: true)
+    failure_threshold: 5          # Open circuit after N consecutive failures (default: 5)
+    success_threshold: 2          # Close circuit after N consecutive successes in half-open (default: 2)
+    timeout_seconds: 30           # Seconds before transitioning from open to half-open (default: 30)
+    half_open_max_calls: 1        # Max concurrent test calls in half-open state (default: 1)
 
 # Global healthcheck configuration
 health_check_enabled: true
