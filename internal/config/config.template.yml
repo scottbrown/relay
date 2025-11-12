@@ -6,6 +6,12 @@ splunk:
   hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
   hec_token: "your-hec-token-here"
   gzip: true
+  # Batch forwarding configuration for improved throughput
+  # batch:
+  #   enabled: false              # Enable/disable batch forwarding (default: false)
+  #   max_size: 100               # Maximum lines per batch (default: 100)
+  #   max_bytes: 1048576          # Maximum bytes per batch (default: 1 MiB)
+  #   flush_interval_seconds: 1   # Maximum seconds before flushing (default: 1)
   # Circuit breaker configuration for HEC forwarding resilience
   circuit_breaker:
     enabled: true                 # Enable/disable circuit breaker (default: true)

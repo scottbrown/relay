@@ -24,6 +24,14 @@ const (
 //go:embed config.template.yml
 var configTemplate string
 
+// BatchConfig represents batch forwarding configuration
+type BatchConfig struct {
+	Enabled       *bool `yaml:"enabled"`
+	MaxSize       int   `yaml:"max_size"`
+	MaxBytes      int   `yaml:"max_bytes"`
+	FlushInterval int   `yaml:"flush_interval_seconds"`
+}
+
 // CircuitBreakerConfig represents circuit breaker configuration
 type CircuitBreakerConfig struct {
 	Enabled          *bool `yaml:"enabled"`
@@ -39,6 +47,7 @@ type SplunkConfig struct {
 	HECToken       string                `yaml:"hec_token"`
 	Gzip           *bool                 `yaml:"gzip"`
 	SourceType     string                `yaml:"source_type"`
+	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 }
 

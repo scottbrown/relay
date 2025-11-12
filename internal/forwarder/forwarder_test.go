@@ -2,10 +2,12 @@ package forwarder
 
 import (
 	"compress/gzip"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -407,5 +409,290 @@ func TestSendWithRetry_RequestError(t *testing.T) {
 	expectedMsg := "hec send failed after retries"
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
+
+func TestBatch_FlushOnSize(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, _ := io.ReadAll(r.Body)
+		lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+		if len(lines) != 5 {
+			t.Errorf("expected 5 lines in batch, got %d", len(lines))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled:       true,
+			MaxSize:       5,
+			MaxBytes:      1 << 20,
+			FlushInterval: 1 * time.Second,
+		},
+	}
+
+	hec := New(config)
+	defer hec.Shutdown(context.Background())
+
+	// Send 5 lines to trigger size-based flush
+	for i := 0; i < 5; i++ {
+		if err := hec.Forward("test-conn", []byte(`{"test":"data"}`)); err != nil {
+			t.Fatalf("forward failed: %v", err)
+		}
+	}
+
+	// Wait for flush to complete
+	time.Sleep(100 * time.Millisecond)
+
+	if requestCount != 1 {
+		t.Errorf("expected 1 request, got %d", requestCount)
+	}
+}
+
+func TestBatch_FlushOnBytes(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled:       true,
+			MaxSize:       100,
+			MaxBytes:      50, // Small byte limit
+			FlushInterval: 1 * time.Second,
+		},
+	}
+
+	hec := New(config)
+	defer hec.Shutdown(context.Background())
+
+	// Send data that exceeds byte limit
+	if err := hec.Forward("test-conn", []byte(`{"test":"this is more than 50 bytes of data for sure"}`)); err != nil {
+		t.Fatalf("forward failed: %v", err)
+	}
+
+	// Wait for flush to complete
+	time.Sleep(100 * time.Millisecond)
+
+	if requestCount != 1 {
+		t.Errorf("expected 1 request, got %d", requestCount)
+	}
+}
+
+func TestBatch_FlushOnTimer(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled:       true,
+			MaxSize:       100,
+			MaxBytes:      1 << 20,
+			FlushInterval: 100 * time.Millisecond,
+		},
+	}
+
+	hec := New(config)
+	defer hec.Shutdown(context.Background())
+
+	// Send one line
+	if err := hec.Forward("test-conn", []byte(`{"test":"data"}`)); err != nil {
+		t.Fatalf("forward failed: %v", err)
+	}
+
+	// Wait for timer-based flush
+	time.Sleep(200 * time.Millisecond)
+
+	if requestCount != 1 {
+		t.Errorf("expected 1 request from timer flush, got %d", requestCount)
+	}
+}
+
+func TestBatch_FlushOnShutdown(t *testing.T) {
+	requestCount := 0
+	receivedLines := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, _ := io.ReadAll(r.Body)
+		lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+		receivedLines = len(lines)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled:       true,
+			MaxSize:       100,
+			MaxBytes:      1 << 20,
+			FlushInterval: 10 * time.Second, // Long interval
+		},
+	}
+
+	hec := New(config)
+
+	// Send 3 lines (not enough to trigger size flush)
+	for i := 0; i < 3; i++ {
+		if err := hec.Forward("test-conn", []byte(`{"test":"data"}`)); err != nil {
+			t.Fatalf("forward failed: %v", err)
+		}
+	}
+
+	// Shutdown should flush remaining data
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	if err := hec.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	if requestCount != 1 {
+		t.Errorf("expected 1 request from shutdown flush, got %d", requestCount)
+	}
+
+	if receivedLines != 3 {
+		t.Errorf("expected 3 lines in shutdown flush, got %d", receivedLines)
+	}
+}
+
+func TestBatch_Disabled(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled: false, // Batching disabled
+		},
+	}
+
+	hec := New(config)
+
+	// Send 3 lines - should result in 3 separate requests
+	for i := 0; i < 3; i++ {
+		if err := hec.Forward("test-conn", []byte(`{"test":"data"}`)); err != nil {
+			t.Fatalf("forward failed: %v", err)
+		}
+	}
+
+	// Wait for requests to complete
+	time.Sleep(100 * time.Millisecond)
+
+	if requestCount != 3 {
+		t.Errorf("expected 3 requests (batching disabled), got %d", requestCount)
+	}
+}
+
+func TestBatch_MultipleBatches(t *testing.T) {
+	var requestCount int
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled:       true,
+			MaxSize:       2,
+			MaxBytes:      1 << 20,
+			FlushInterval: 1 * time.Second,
+		},
+	}
+
+	hec := New(config)
+
+	// Send 7 lines - should trigger 3 batches (2+2+2) with 1 remaining
+	for i := 0; i < 7; i++ {
+		if err := hec.Forward("test-conn", []byte(`{"test":"data"}`)); err != nil {
+			t.Fatalf("forward failed: %v", err)
+		}
+		// Small delay between sends to ensure proper batch separation
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Shutdown will flush the remaining 1 line
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	if err := hec.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	mu.Lock()
+	count := requestCount
+	mu.Unlock()
+
+	// Should have 3 full batches + 1 partial batch on shutdown = 4 total requests
+	if count != 4 {
+		t.Errorf("expected 4 requests (3 full batches + 1 shutdown), got %d", count)
+	}
+}
+
+func TestBatch_ShutdownTimeout(t *testing.T) {
+	// Server that never responds
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	config := Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Batch: BatchConfig{
+			Enabled:       true,
+			MaxSize:       100,
+			MaxBytes:      1 << 20,
+			FlushInterval: 1 * time.Second,
+		},
+	}
+
+	hec := New(config)
+
+	// Send one line
+	if err := hec.Forward("test-conn", []byte(`{"test":"data"}`)); err != nil {
+		t.Fatalf("forward failed: %v", err)
+	}
+
+	// Shutdown with short timeout should return context error
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := hec.Shutdown(ctx)
+	if err != context.DeadlineExceeded {
+		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
 }
