@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-This document contains baseline performance metrics for the relay service, measured on an Apple M1 Pro (darwin/arm64).
+This document contains baseline performance metrics for the relay service, measured on multiple Apple Silicon machines (darwin/arm64).
 
 ## Running Benchmarks
 
@@ -15,7 +15,9 @@ go test -bench=. -benchmem ./internal/forwarder/
 go test -bench=. -benchmem ./internal/server/
 ```
 
-## Baseline Performance (2025-11-10)
+## Baseline Performance
+
+### Apple M1 Pro (2025-11-10)
 
 **Test Environment:**
 - CPU: Apple M1 Pro
@@ -142,6 +144,112 @@ End-to-end connection handling performance:
 1. **Gzip Compression**: Consider buffer pooling to reduce allocations
 2. **Server Async Forwarding**: Current implementation may benefit from batching
 3. **Connection Pooling**: HTTP client connection reuse already enabled
+
+### Apple M2 (2025-11-11)
+
+**Test Environment:**
+- CPU: Apple M2
+- OS: darwin/arm64
+- Go version: 1.21+
+
+#### Processor Package
+
+Line reading performance with various payload sizes:
+
+| Benchmark | Iterations | Time/op | Throughput | Memory/op | Allocs/op |
+|-----------|------------|---------|------------|-----------|-----------|
+| ReadLineLimited_Small (100B) | 2,400,175 | 533.6 ns | 189.30 MB/s | 4,368 B | 4 |
+| ReadLineLimited_Medium (1KB) | 1,471,080 | 812.7 ns | 1261.31 MB/s | 6,448 B | 4 |
+| ReadLineLimited_Large (10KB) | 341,968 | 3,589 ns | 2853.09 MB/s | 34,168 B | 8 |
+| ReadLineLimited_MaxSize (1MB) | 4,045 | 321,836 ns | 3258.11 MB/s | 4,210,103 B | 269 |
+| ReadLineLimited_Oversized (2MB) | 1,953 | 608,422 ns | 3446.87 MB/s | 8,449,465 B | 528 |
+
+JSON validation performance:
+
+| Benchmark | Iterations | Time/op | Throughput | Memory/op | Allocs/op |
+|-----------|------------|---------|------------|-----------|-----------|
+| IsValidJSON_Small (66B) | 6,106,771 | 194.2 ns | 339.86 MB/s | 0 B | 0 |
+| IsValidJSON_Medium (1KB) | 554,745 | 2,192 ns | 438.44 MB/s | 0 B | 0 |
+| IsValidJSON_Large (10KB) | 52,251 | 22,858 ns | 446.29 MB/s | 0 B | 0 |
+| IsValidJSON_Invalid | 7,177,077 | 167.7 ns | 298.24 MB/s | 24 B | 1 |
+| Truncate | 9,212,223 | 128.8 ns | N/A | 1,232 B | 2 |
+
+**Key Observations:**
+- JSON validation maintains zero allocations for valid payloads
+- Line reading throughput remains excellent and scales well
+- Small decrease in time/op for invalid JSON validation (167.7 ns vs 168.4 ns)
+
+#### Storage Package
+
+File write operations with daily rotation:
+
+| Benchmark | Iterations | Time/op | Throughput | Memory/op | Allocs/op |
+|-----------|------------|---------|------------|-----------|-----------|
+| Write_Small (100B) | 649,660 | 1,546 ns | 64.68 MB/s | 32 B | 2 |
+| Write_Medium (1KB) | 509,670 | 2,315 ns | 442.37 MB/s | 1,576 B | 4 |
+| Write_Large (10KB) | 190,916 | 6,066 ns | 1688.14 MB/s | 13,608 B | 4 |
+| Write_Concurrent | 376,027 | 2,999 ns | 341.42 MB/s | 1,576 B | 4 |
+| Rotation | 456 | 2,688,669 ns | N/A | 2,296 B | 12 |
+| CurrentFile | 6,469,957 | 183.9 ns | N/A | 136 B | 2 |
+| EnsureDir | 714,373 | 1,740 ns | N/A | 400 B | 3 |
+
+**Key Observations:**
+- Write throughput scales excellently with payload size (64.68 MB/s → 1688.14 MB/s)
+- Minimal memory allocations for writes (2-4 allocs)
+- File rotation remains relatively expensive (~2.7ms) but infrequent
+- Concurrent writes maintain excellent performance
+
+#### Forwarder Package
+
+Splunk HEC forwarding performance:
+
+| Benchmark | Iterations | Time/op | Throughput | Memory/op | Allocs/op |
+|-----------|------------|---------|------------|-----------|-----------|
+| Forward_Small_NoGzip | 28,137 | 41,793 ns | 2.39 MB/s | 7,337 B | 92 |
+| Forward_Small_Gzip | 9,955 | 116,132 ns | 0.86 MB/s | 842,141 B | 122 |
+| Forward_Medium_NoGzip | 28,694 | 41,741 ns | 24.53 MB/s | 7,385 B | 92 |
+| Forward_Medium_Gzip | 10,000 | 116,050 ns | 8.82 MB/s | 842,007 B | 122 |
+| Forward_Large_NoGzip | 27,445 | 43,429 ns | 235.79 MB/s | 14,144 B | 95 |
+| Forward_Large_Gzip | 8,952 | 134,867 ns | 75.93 MB/s | 840,160 B | 121 |
+| Forward_WithRetry | 2 | 752,810,375 ns | 0.00 MB/s | 70,224 B | 344 |
+
+Gzip compression performance:
+
+| Benchmark | Iterations | Time/op | Throughput | Memory/op | Allocs/op |
+|-----------|------------|---------|------------|-----------|-----------|
+| GzipCompression_Small | 19,730 | 57,381 ns | 1.74 MB/s | 813,942 B | 20 |
+| GzipCompression_Medium | 21,656 | 55,260 ns | 18.53 MB/s | 813,940 B | 20 |
+| GzipCompression_Large | 16,734 | 70,890 ns | 144.45 MB/s | 814,051 B | 21 |
+
+Health check performance:
+
+| Benchmark | Iterations | Time/op | Memory/op | Allocs/op |
+|-----------|------------|---------|-----------|-----------|
+| HealthCheck | 30,115 | 39,150 ns | 6,449 B | 71 |
+
+**Key Observations:**
+- Gzip compression adds significant overhead but scales well
+- Gzip maintains consistent ~814KB memory per compression operation
+- Retry logic adds substantial latency (~753ms with retries)
+- No-gzip forwarding has low memory overhead (~7-14KB)
+
+#### Server Package
+
+End-to-end connection handling performance:
+
+| Benchmark | Iterations | Time/op | Throughput | Memory/op | Allocs/op |
+|-----------|------------|---------|------------|-----------|-----------|
+| HandleConnection_Small | 3,842 | 8,064,323 ns | 0.06 MB/s | 176,028 B | 1,647 |
+| HandleConnection_Medium | 4,915 | 10,786,017 ns | 0.89 MB/s | 290,435 B | 2,368 |
+| HandleConnection_WithGzip | 925 | 1,139,180 ns | 0.46 MB/s | 8,342,742 B | 2,139 |
+| HandleConnection_MixedValid | 10,000 | 3,929,187 ns | 0.05 MB/s | 72,608 B | 648 |
+| HandleConnection_NoForwarding | 36,446 | 32,002 ns | 16.25 MB/s | 9,571 B | 104 |
+
+**Key Observations:**
+- End-to-end handling includes storage + HEC forwarding overhead
+- No-forwarding mode is significantly faster (storage-only)
+- Gzip adds substantial memory overhead (~8.3MB per connection)
+- Mixed valid/invalid JSON handled gracefully
 
 ## Tracking Performance
 
