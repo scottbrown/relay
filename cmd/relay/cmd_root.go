@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -89,6 +90,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	// Create servers for each listener
 	servers := make([]*server.Server, 0, len(cfg.Listeners))
 	storageManagers := make([]*storage.Manager, 0, len(cfg.Listeners))
+	forwarders := make([]*forwarder.HEC, 0, len(cfg.Listeners))
 
 	for _, listenerCfg := range cfg.Listeners {
 		// Merge global and per-listener HEC config
@@ -111,6 +113,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 
 		// Initialize HEC forwarder
 		hecForwarder := forwarder.New(hecCfg)
+		forwarders = append(forwarders, hecForwarder)
 
 		// Health check for HEC if configured
 		if hecCfg.URL != "" && hecCfg.Token != "" {
@@ -192,6 +195,17 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			}
 		}
 	}
+
+	// Shutdown forwarders with timeout
+	slog.Info("shutting down forwarders")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, fwd := range forwarders {
+		if err := fwd.Shutdown(ctx); err != nil {
+			slog.Warn("failed to shutdown forwarder", "error", err)
+		}
+	}
 }
 
 func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
@@ -205,6 +219,7 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 			cfg.UseGzip = *global.Gzip
 		}
 		cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, nil)
+		cfg.Batch = mergeBatchConfig(global.Batch, nil)
 	}
 
 	// Override with per-listener settings
@@ -224,8 +239,10 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		// Merge circuit breaker config (per-listener can override global)
 		if global != nil {
 			cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, perListener.CircuitBreaker)
+			cfg.Batch = mergeBatchConfig(global.Batch, perListener.Batch)
 		} else {
 			cfg.CircuitBreaker = mergeCircuitBreakerConfig(nil, perListener.CircuitBreaker)
+			cfg.Batch = mergeBatchConfig(nil, perListener.Batch)
 		}
 	}
 
@@ -276,4 +293,48 @@ func mergeCircuitBreakerConfig(global, perListener *config.CircuitBreakerConfig)
 	}
 
 	return cbCfg
+}
+
+func mergeBatchConfig(global, perListener *config.BatchConfig) forwarder.BatchConfig {
+	// Start with defaults
+	batchCfg := forwarder.BatchConfig{
+		Enabled:       false,
+		MaxSize:       100,
+		MaxBytes:      1 << 20, // 1 MiB
+		FlushInterval: 1 * time.Second,
+	}
+
+	// Apply global settings
+	if global != nil {
+		if global.Enabled != nil {
+			batchCfg.Enabled = *global.Enabled
+		}
+		if global.MaxSize > 0 {
+			batchCfg.MaxSize = global.MaxSize
+		}
+		if global.MaxBytes > 0 {
+			batchCfg.MaxBytes = global.MaxBytes
+		}
+		if global.FlushInterval > 0 {
+			batchCfg.FlushInterval = time.Duration(global.FlushInterval) * time.Second
+		}
+	}
+
+	// Override with per-listener settings
+	if perListener != nil {
+		if perListener.Enabled != nil {
+			batchCfg.Enabled = *perListener.Enabled
+		}
+		if perListener.MaxSize > 0 {
+			batchCfg.MaxSize = perListener.MaxSize
+		}
+		if perListener.MaxBytes > 0 {
+			batchCfg.MaxBytes = perListener.MaxBytes
+		}
+		if perListener.FlushInterval > 0 {
+			batchCfg.FlushInterval = time.Duration(perListener.FlushInterval) * time.Second
+		}
+	}
+
+	return batchCfg
 }

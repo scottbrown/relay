@@ -3,15 +3,25 @@ package forwarder
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/scottbrown/relay/internal/circuitbreaker"
 )
+
+// BatchConfig contains batch forwarding configuration
+type BatchConfig struct {
+	Enabled       bool
+	MaxSize       int           // Maximum lines per batch
+	MaxBytes      int           // Maximum bytes per batch
+	FlushInterval time.Duration // Maximum time before flushing
+}
 
 // Config contains configuration for the Splunk HEC forwarder
 type Config struct {
@@ -19,7 +29,15 @@ type Config struct {
 	Token          string
 	SourceType     string
 	UseGzip        bool
+	Batch          BatchConfig
 	CircuitBreaker circuitbreaker.Config
+}
+
+// batch holds the current batch state
+type batch struct {
+	lines [][]byte
+	size  int
+	timer *time.Timer
 }
 
 // HEC represents a Splunk HTTP Event Collector forwarder
@@ -27,15 +45,37 @@ type HEC struct {
 	config         Config
 	client         *http.Client
 	circuitBreaker *circuitbreaker.CircuitBreaker
+
+	// Batch state (only used when batch.Enabled is true)
+	mu       sync.Mutex
+	batch    *batch
+	flushCh  chan struct{}
+	shutDown chan struct{}
+	wg       sync.WaitGroup
 }
 
 // New creates a new HEC forwarder with the given configuration
 func New(config Config) *HEC {
-	return &HEC{
+	h := &HEC{
 		config:         config,
 		client:         &http.Client{Timeout: 15 * time.Second},
 		circuitBreaker: circuitbreaker.New(config.CircuitBreaker),
 	}
+
+	// Initialize batch mode if enabled
+	if config.Batch.Enabled {
+		h.batch = &batch{
+			lines: make([][]byte, 0, config.Batch.MaxSize),
+		}
+		h.flushCh = make(chan struct{}, 1)
+		h.shutDown = make(chan struct{})
+
+		// Start flush worker
+		h.wg.Add(1)
+		go h.flushWorker()
+	}
+
+	return h
 }
 
 // Forward sends data to Splunk HEC with retry logic and circuit breaker protection
@@ -44,6 +84,12 @@ func (h *HEC) Forward(connID string, data []byte) error {
 		return nil // HEC forwarding disabled
 	}
 
+	// If batching is enabled, add to batch
+	if h.config.Batch.Enabled {
+		return h.addToBatch(data)
+	}
+
+	// Otherwise send immediately
 	slog.Debug("forwarding to HEC", "conn_id", connID, "hec_url", h.config.URL)
 
 	return h.circuitBreaker.Call(func() error {
@@ -174,4 +220,134 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 	}
 
 	return errors.New("hec send failed after retries")
+}
+
+// addToBatch adds data to the current batch and triggers flush if needed
+func (h *HEC) addToBatch(data []byte) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Make a copy of the data to avoid data races
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	// Add to batch
+	h.batch.lines = append(h.batch.lines, dataCopy)
+	h.batch.size += len(dataCopy)
+
+	// Check if we should flush
+	shouldFlush := len(h.batch.lines) >= h.config.Batch.MaxSize ||
+		h.batch.size >= h.config.Batch.MaxBytes
+
+	if shouldFlush {
+		// Stop timer if it exists
+		if h.batch.timer != nil {
+			h.batch.timer.Stop()
+			h.batch.timer = nil
+		}
+		// Trigger immediate flush
+		select {
+		case h.flushCh <- struct{}{}:
+		default:
+			// Flush already pending
+		}
+	} else if h.batch.timer == nil {
+		// Start flush timer for the first line in batch
+		h.batch.timer = time.AfterFunc(h.config.Batch.FlushInterval, func() {
+			h.mu.Lock()
+			h.batch.timer = nil
+			h.mu.Unlock()
+			select {
+			case h.flushCh <- struct{}{}:
+			default:
+			}
+		})
+	}
+
+	return nil
+}
+
+// flushWorker runs in a goroutine and handles batch flushing
+func (h *HEC) flushWorker() {
+	defer h.wg.Done()
+
+	for {
+		select {
+		case <-h.flushCh:
+			h.doFlush()
+		case <-h.shutDown:
+			// Final flush before shutdown
+			h.doFlush()
+			return
+		}
+	}
+}
+
+// doFlush performs the actual flush operation
+func (h *HEC) doFlush() {
+	h.mu.Lock()
+
+	if len(h.batch.lines) == 0 {
+		h.mu.Unlock()
+		return
+	}
+
+	// Collect lines to send
+	lines := h.batch.lines
+	batchSize := len(lines)
+	batchBytes := h.batch.size
+
+	// Reset batch
+	h.batch.lines = make([][]byte, 0, h.config.Batch.MaxSize)
+	h.batch.size = 0
+	if h.batch.timer != nil {
+		h.batch.timer.Stop()
+		h.batch.timer = nil
+	}
+
+	h.mu.Unlock()
+
+	// Combine lines with newlines
+	payload := bytes.Join(lines, []byte("\n"))
+
+	// Send batch
+	err := h.circuitBreaker.Call(func() error {
+		return h.sendWithRetry("batch", payload)
+	})
+
+	if err != nil {
+		slog.Error("batch forward failed",
+			"lines", batchSize,
+			"bytes", batchBytes,
+			"error", err)
+	} else {
+		slog.Debug("batch forwarded",
+			"lines", batchSize,
+			"bytes", batchBytes)
+	}
+}
+
+// Shutdown gracefully shuts down the forwarder, flushing any remaining batched data
+func (h *HEC) Shutdown(ctx context.Context) error {
+	if !h.config.Batch.Enabled {
+		return nil
+	}
+
+	// Signal shutdown
+	close(h.shutDown)
+
+	// Wait for flush worker to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		h.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		slog.Info("forwarder shutdown complete")
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

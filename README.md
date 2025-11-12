@@ -9,13 +9,14 @@ Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log
 - **Data Validation**: JSON validation for incoming log lines
 - **Local Storage**: Daily-rotated NDJSON file persistence with configurable prefixes
 - **Splunk HEC Integration**: Optional real-time forwarding to Splunk's HTTP Event Collector
+- **Batch Forwarding**: Configurable batching of events for improved HEC throughput
 - **Circuit Breaker**: Automatic failure detection and recovery for HEC forwarding resilience
 - **TLS Support**: Optional TLS encryption for incoming connections
 - **Access Control**: CIDR-based IP filtering per listener
 - **YAML Configuration**: Required configuration file for all settings
 - **Template Generation**: Built-in configuration template generator
 - **Health Checks**: Smoke testing for Splunk HEC connectivity
-- **Graceful Shutdown**: Handles system signals for clean service termination
+- **Graceful Shutdown**: Handles system signals for clean service termination with batch flush
 
 ## How it Works
 
@@ -93,6 +94,12 @@ splunk:
   hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
   hec_token: "your-hec-token-here"
   gzip: true
+  # Batch forwarding configuration for improved throughput (optional)
+  batch:
+    enabled: true                 # Enable/disable batch forwarding (default: false)
+    max_size: 100                 # Maximum lines per batch (default: 100)
+    max_bytes: 1048576            # Maximum bytes per batch (default: 1 MiB)
+    flush_interval_seconds: 1     # Maximum seconds before flushing (default: 1)
   # Circuit breaker configuration for HEC forwarding resilience
   circuit_breaker:
     enabled: true                 # Enable/disable circuit breaker (default: true)
@@ -143,6 +150,10 @@ listeners:
 | `splunk.hec_url` | Global Splunk HEC raw endpoint URL | No | - |
 | `splunk.hec_token` | Global Splunk HEC authentication token | No | - |
 | `splunk.gzip` | Global gzip compression for HEC | No | - |
+| `splunk.batch.enabled` | Enable batch forwarding for HEC | No | `false` |
+| `splunk.batch.max_size` | Maximum lines per batch | No | `100` |
+| `splunk.batch.max_bytes` | Maximum bytes per batch | No | `1048576` |
+| `splunk.batch.flush_interval_seconds` | Max seconds before flushing | No | `1` |
 | `splunk.circuit_breaker.enabled` | Enable circuit breaker for HEC | No | `true` |
 | `splunk.circuit_breaker.failure_threshold` | Failures before opening circuit | No | `5` |
 | `splunk.circuit_breaker.success_threshold` | Successes before closing circuit | No | `2` |
@@ -231,6 +242,56 @@ Error: listener user-activity: cannot bind to listen address: address already in
 - Provides clear, actionable error messages
 - Prevents runtime failures during normal operation
 - Reduces mean time to resolution for configuration issues
+
+### Batch Forwarding
+
+Batch forwarding significantly improves HEC throughput by combining multiple log events into a single HTTP request, reducing network overhead and improving overall performance.
+
+**How it works:**
+
+When batch forwarding is enabled, events are buffered and flushed to Splunk HEC based on three configurable triggers:
+
+1. **Size trigger**: Flush when the batch reaches `max_size` lines
+2. **Byte trigger**: Flush when the batch reaches `max_bytes` total size
+3. **Time trigger**: Flush when `flush_interval_seconds` elapses since the first event in the batch
+
+Additionally, any remaining buffered events are automatically flushed during graceful shutdown.
+
+**Configuration examples:**
+
+High throughput (larger batches, less frequent flushes):
+```yaml
+splunk:
+  batch:
+    enabled: true
+    max_size: 500
+    max_bytes: 5242880  # 5 MiB
+    flush_interval_seconds: 5
+```
+
+Low latency (smaller batches, more frequent flushes):
+```yaml
+splunk:
+  batch:
+    enabled: true
+    max_size: 10
+    max_bytes: 102400  # 100 KiB
+    flush_interval_seconds: 0.1
+```
+
+**Performance impact:**
+
+- **Throughput**: 10-100x reduction in HTTP overhead for high-volume streams
+- **Network**: Dramatically fewer connections and requests to HEC
+- **CPU**: Lower CPU usage on both relay and Splunk HEC
+- **Latency**: Slight increase in end-to-end latency due to buffering (configurable via `flush_interval_seconds`)
+
+**Trade-offs:**
+
+- Batching disabled (default): Lower latency, higher overhead
+- Batching enabled: Higher throughput, slightly higher latency
+
+**Note:** Batch forwarding is disabled by default to maintain backward compatibility. Enable it explicitly for improved performance in high-volume environments.
 
 ## Usage
 
