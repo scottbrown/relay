@@ -193,7 +193,10 @@ func (m *MultiHEC) forwardPrimaryFailover(connID string, data []byte) error {
 func (m *MultiHEC) forwardRoundRobin(connID string, data []byte) error {
 	// Atomically increment and get counter
 	count := atomic.AddUint64(&m.rrCounter, 1)
-	idx := int((count - 1) % uint64(len(m.targets)))
+	// Safe conversion: modulo ensures result fits in int since it's bounded by len(m.targets)
+	numTargets := uint64(len(m.targets))
+	// #nosec G115 -- Modulo operation guarantees result < numTargets, which is derived from len() (an int)
+	idx := int((count - 1) % numTargets)
 
 	target := m.targets[idx]
 	targetName := m.targetNames[idx]

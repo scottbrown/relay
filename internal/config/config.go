@@ -317,23 +317,23 @@ func validateListenAddr(addr string) error {
 	if err != nil {
 		return err
 	}
-	ln.Close()
+	_ = ln.Close() // Ignore error - best effort cleanup
 	return nil
 }
 
 // validateStorageDir ensures the storage directory exists and is writable
 func validateStorageDir(dir string) error {
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("cannot create output directory: %w", err)
 	}
 
 	// Verify directory is writable by creating a temp file
 	testFile := filepath.Join(dir, ".writetest")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
 		return fmt.Errorf("output directory not writable: %w", err)
 	}
-	os.Remove(testFile)
+	_ = os.Remove(testFile) // Ignore error - best effort cleanup
 
 	return nil
 }

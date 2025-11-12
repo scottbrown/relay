@@ -174,7 +174,7 @@ func (s *Server) acceptLoop() error {
 		// Set accept deadline to periodically check shutdown channel
 		// This allows graceful shutdown without forcibly closing connections
 		if tcpListener, ok := s.listener.(*net.TCPListener); ok {
-			tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
+			_ = tcpListener.SetDeadline(time.Now().Add(1 * time.Second)) // Ignore error - deadline is best effort
 		}
 
 		conn, err := s.listener.Accept()
