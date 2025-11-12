@@ -9,6 +9,7 @@ Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log
 - **Data Validation**: JSON validation for incoming log lines
 - **Local Storage**: Daily-rotated NDJSON file persistence with configurable prefixes
 - **Splunk HEC Integration**: Optional real-time forwarding to Splunk's HTTP Event Collector
+- **Multi-Target HEC Support**: Forward to multiple Splunk endpoints with configurable routing (all, primary-failover, round-robin)
 - **Batch Forwarding**: Configurable batching of events for improved HEC throughput
 - **Circuit Breaker**: Automatic failure detection and recovery for HEC forwarding resilience
 - **TLS Support**: Optional TLS encryption for incoming connections
@@ -292,6 +293,161 @@ splunk:
 - Batching enabled: Higher throughput, slightly higher latency
 
 **Note:** Batch forwarding is disabled by default to maintain backward compatibility. Enable it explicitly for improved performance in high-volume environments.
+
+### Multi-Target HEC Support
+
+Relay supports forwarding logs to multiple Splunk HEC endpoints simultaneously. This enables use cases like:
+
+- **High Availability**: Forward to primary and backup Splunk instances
+- **Multi-Tenancy**: Send logs to different Splunk indexes or instances
+- **Disaster Recovery**: Maintain redundant log copies across geographies
+- **Load Distribution**: Distribute logs across multiple Splunk indexers
+
+**Configuration:**
+
+Instead of using the legacy single `hec_url` and `hec_token` fields, define multiple targets using the `hec_targets` array:
+
+```yaml
+splunk:
+  hec_targets:
+    - name: primary
+      hec_url: "https://splunk1.example.com:8088/services/collector/raw"
+      hec_token: "token1"
+      source_type: "zpa:logs"
+      gzip: true
+
+    - name: secondary
+      hec_url: "https://splunk2.example.com:8088/services/collector/raw"
+      hec_token: "token2"
+      source_type: "zpa:logs"
+      gzip: true
+
+    - name: backup
+      hec_url: "https://splunk3.example.com:8088/services/collector/raw"
+      hec_token: "token3"
+      source_type: "zpa:logs"
+      gzip: false
+
+  routing:
+    mode: all  # Options: all, primary-failover, round-robin
+```
+
+**Routing Modes:**
+
+1. **All (Broadcast)**
+   - Sends every log line to all configured targets concurrently
+   - Ideal for: HA, DR, multi-tenant deployments
+   - Behavior: Continues even if some targets fail
+
+   ```yaml
+   routing:
+     mode: all
+   ```
+
+2. **Primary-Failover**
+   - Tries targets in order, fails over to next target if primary fails
+   - Ideal for: Primary/backup configurations
+   - Behavior: Only uses secondary if primary is unavailable
+
+   ```yaml
+   routing:
+     mode: primary-failover
+   ```
+
+3. **Round-Robin**
+   - Distributes logs across targets evenly
+   - Ideal for: Load balancing across multiple indexers
+   - Behavior: Each log goes to exactly one target in rotation
+
+   ```yaml
+   routing:
+     mode: round-robin
+   ```
+
+**Per-Target Configuration:**
+
+Each target supports individual configuration for:
+- `gzip`: Compression setting
+- `batch`: Batching configuration (same options as global)
+- `circuit_breaker`: Circuit breaker settings (same options as global)
+
+```yaml
+splunk:
+  hec_targets:
+    - name: high-throughput
+      hec_url: "https://splunk1.example.com:8088/services/collector/raw"
+      hec_token: "token1"
+      source_type: "zpa:logs"
+      gzip: true
+      batch:
+        enabled: true
+        max_size: 500
+        max_bytes: 5242880
+        flush_interval_seconds: 5
+      circuit_breaker:
+        enabled: true
+        failure_threshold: 3
+        timeout_seconds: 15
+
+    - name: backup
+      hec_url: "https://splunk2.example.com:8088/services/collector/raw"
+      hec_token: "token2"
+      source_type: "zpa:logs"
+      gzip: false
+      circuit_breaker:
+        enabled: false
+```
+
+**Per-Listener Multi-Target Configuration:**
+
+Multi-target configuration can be specified per-listener to send different log types to different Splunk instances:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "./zpa-logs"
+    file_prefix: "zpa-user-activity"
+    splunk:
+      hec_targets:
+        - name: production
+          hec_url: "https://prod-splunk.example.com:8088/services/collector/raw"
+          hec_token: "prod-token"
+          source_type: "zpa:user:activity"
+        - name: analytics
+          hec_url: "https://analytics-splunk.example.com:8088/services/collector/raw"
+          hec_token: "analytics-token"
+          source_type: "zpa:user:activity"
+      routing:
+        mode: all
+```
+
+**Backward Compatibility:**
+
+The legacy single HEC configuration is still supported for existing deployments:
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  # ... other options
+```
+
+**Note:** You cannot mix legacy single HEC configuration (`hec_url`/`hec_token`) with multi-target configuration (`hec_targets`) in the same scope (either global or per-listener). Choose one approach.
+
+**Health Checks:**
+
+When using multi-target configuration, health checks verify connectivity to all configured targets. The relay will fail to start if any target is unreachable or has invalid credentials.
+
+**Logging:**
+
+Each target's forwarding success/failure is logged separately with the target name:
+
+```json
+{"time":"2025-11-12T10:15:45.680Z","level":"DEBUG","msg":"HEC forward succeeded for target","target":"primary","conn_id":"550e8400-e29b-41d4-a716-446655440000"}
+{"time":"2025-11-12T10:15:45.750Z","level":"WARN","msg":"HEC forward failed for target","target":"backup","conn_id":"550e8400-e29b-41d4-a716-446655440000","error":"connection refused"}
+```
 
 ## Usage
 
