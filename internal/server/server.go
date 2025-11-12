@@ -16,6 +16,7 @@ import (
 
 	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/forwarder"
+	"github.com/scottbrown/relay/internal/metrics"
 	"github.com/scottbrown/relay/internal/processor"
 	"github.com/scottbrown/relay/internal/storage"
 )
@@ -205,6 +206,7 @@ func (s *Server) acceptLoop() error {
 		// Check ACL
 		ra, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
 		if !s.acl.Allows(ra.IP) {
+			metrics.ConnectionsRejected.Add(1)
 			slog.Warn("connection denied by ACL", "client_ip", ra.IP.String())
 			if err := conn.Close(); err != nil {
 				slog.Warn("failed to close denied connection", "error", err)
@@ -212,6 +214,7 @@ func (s *Server) acceptLoop() error {
 			continue
 		}
 
+		metrics.ConnectionsAccepted.Add(1)
 		go s.handleConnection(conn)
 	}
 }
@@ -221,6 +224,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.connections.Add(1)
 	defer s.connections.Done()
 	defer conn.Close()
+
+	// Track active connections
+	metrics.ConnectionsActive.Add(1)
+	defer metrics.ConnectionsActive.Add(-1)
 
 	// Check if shutdown is in progress
 	select {
@@ -254,11 +261,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 			continue
 		}
 
+		// Track bytes received
+		metrics.BytesReceived.Add(int64(len(line)))
+
 		// Validate JSON
 		if !processor.IsValidJSON(line) {
+			metrics.LinesProcessed.Add("invalid", 1)
 			slog.Warn("invalid JSON", "conn_id", connID, "client_addr", clientAddr, "line", processor.Truncate(line, 200))
 			continue
 		}
+
+		metrics.LinesProcessed.Add("valid", 1)
 
 		// Store locally
 		if err := s.storage.Write(connID, line); err != nil {

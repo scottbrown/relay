@@ -18,6 +18,7 @@ import (
 	"github.com/scottbrown/relay/internal/config"
 	"github.com/scottbrown/relay/internal/forwarder"
 	"github.com/scottbrown/relay/internal/healthcheck"
+	"github.com/scottbrown/relay/internal/metrics"
 	"github.com/scottbrown/relay/internal/server"
 	"github.com/scottbrown/relay/internal/storage"
 
@@ -62,6 +63,15 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		},
 	})
 	slog.SetDefault(slog.New(handler))
+
+	// Initialize metrics
+	metrics.Init(relay.Version())
+
+	// Start metrics server
+	if err := metrics.StartServer(metricsAddr); err != nil {
+		slog.Error("failed to start metrics server", "error", err)
+		os.Exit(1)
+	}
 
 	// Load configuration (config file is now required)
 	cfg, err := config.LoadConfig(configFile)
