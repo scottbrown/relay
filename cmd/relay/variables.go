@@ -1,6 +1,7 @@
 package main
 
 var (
-	configFile string
-	logLevel   string
+	configFile  string
+	logLevel    string
+	metricsAddr string
 )

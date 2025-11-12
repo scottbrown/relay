@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/scottbrown/relay/internal/circuitbreaker"
+	"github.com/scottbrown/relay/internal/metrics"
 )
 
 // BatchConfig holds configuration for batching multiple log lines before forwarding.
@@ -216,6 +217,8 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 			if err := resp.Body.Close(); err != nil {
 				// Log but don't fail on close error in success path
 			}
+			metrics.HecForwards.Add("success", 1)
+			metrics.HecBytesForwarded.Add(int64(len(data)))
 			slog.Debug("HEC forward succeeded", "conn_id", connID, "status", resp.StatusCode)
 			return nil
 		}
@@ -225,12 +228,18 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 			_ = resp.Body.Close()
 		}
 
+		// Track retry attempts (don't count initial attempt)
+		if i > 0 {
+			metrics.HecRetries.Add(1)
+		}
+
 		// Don't sleep after the last attempt
 		if i < 4 {
 			time.Sleep(time.Duration(250*(1<<i)) * time.Millisecond)
 		}
 	}
 
+	metrics.HecForwards.Add("failure", 1)
 	return errors.New("hec send failed after retries")
 }
 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/scottbrown/relay/internal/metrics"
 )
 
 // Manager handles file persistence with automatic daily rotation.
@@ -60,11 +62,16 @@ func (m *Manager) Write(connID string, data []byte) error {
 		}
 
 		m.curDay = day
+		metrics.StorageFileRotations.Add(1)
 	}
 
 	n, err := m.file.Write(append(data, '\n'))
 	if err == nil {
+		metrics.StorageWrites.Add("success", 1)
+		metrics.StorageBytesWritten.Add(int64(n))
 		slog.Debug("stored line", "conn_id", connID, "bytes", n)
+	} else {
+		metrics.StorageWrites.Add("failure", 1)
 	}
 	return err
 }

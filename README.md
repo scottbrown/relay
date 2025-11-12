@@ -17,6 +17,7 @@ Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log
 - **YAML Configuration**: Required configuration file for all settings
 - **Template Generation**: Built-in configuration template generator
 - **Health Checks**: Smoke testing for Splunk HEC connectivity
+- **Operational Metrics**: Built-in instrumentation via expvar for monitoring service health
 - **Graceful Shutdown**: Handles system signals for clean service termination with batch flush
 
 ## How it Works
@@ -759,6 +760,134 @@ jq 'select(.client_addr == "10.0.1.5:54321")' relay.log
 - Debug specific connection issues without noise from other connections
 - Monitor connection lifecycle (accept → validate → store → forward → close)
 - Identify performance bottlenecks for specific requests
+
+### Operational Metrics
+
+The relay exposes operational metrics via an HTTP endpoint using Go's built-in `expvar` package. These metrics provide visibility into service health, throughput, and performance without requiring external dependencies.
+
+**Metrics Endpoint:**
+
+The metrics server runs on a separate HTTP port (default `:9017`) and exposes metrics at the standard `/debug/vars` endpoint in JSON format.
+
+**Configuration:**
+
+```bash
+# Enable metrics on default port (:9017)
+./relay --config config.yml --metrics-addr :9017
+
+# Use custom port
+./relay --config config.yml --metrics-addr :8080
+
+# Disable metrics
+./relay --config config.yml --metrics-addr ""
+```
+
+**Available Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `connections_accepted` | Counter | Total connections accepted |
+| `connections_rejected` | Counter | Total connections rejected by ACL |
+| `connections_active` | Gauge | Currently active connections |
+| `bytes_received_total` | Counter | Total bytes received from clients |
+| `storage_writes` | Map | Storage write results (`success`, `failure`) |
+| `storage_bytes_written` | Counter | Total bytes written to local storage |
+| `storage_file_rotations` | Counter | Number of daily file rotations |
+| `hec_forwards` | Map | HEC forward results (`success`, `failure`) |
+| `hec_bytes_forwarded` | Counter | Total bytes forwarded to Splunk HEC |
+| `hec_retries_total` | Counter | Total HEC retry attempts |
+| `lines_processed` | Map | Line processing results (`valid`, `invalid`) |
+| `start_time_seconds` | Gauge | Service start time (Unix timestamp) |
+| `version_info` | String | Service version |
+
+**Example Output:**
+
+```bash
+$ curl -s http://localhost:9017/debug/vars | jq
+{
+  "connections_accepted": 1523,
+  "connections_active": 3,
+  "connections_rejected": 12,
+  "bytes_received_total": 104857600,
+  "storage_writes": {
+    "success": 15234,
+    "failure": 2
+  },
+  "storage_bytes_written": 104860000,
+  "storage_file_rotations": 7,
+  "hec_forwards": {
+    "success": 15220,
+    "failure": 14
+  },
+  "hec_bytes_forwarded": 104850000,
+  "hec_retries_total": 42,
+  "lines_processed": {
+    "valid": 15234,
+    "invalid": 28
+  },
+  "start_time_seconds": 1731417600,
+  "version_info": "1.1.0",
+  "cmdline": ["./relay", "--config", "config.yml"],
+  "memstats": {
+    "Alloc": 2097152,
+    "TotalAlloc": 104857600,
+    ...
+  }
+}
+```
+
+**Integration with Monitoring Systems:**
+
+The JSON output can be consumed by various monitoring systems:
+
+1. **Prometheus** (via json_exporter or custom exporter):
+   ```yaml
+   # prometheus.yml
+   scrape_configs:
+     - job_name: 'relay'
+       metrics_path: '/debug/vars'
+       static_configs:
+         - targets: ['localhost:9017']
+   ```
+
+2. **Telegraf** (via http input plugin):
+   ```toml
+   [[inputs.http]]
+     urls = ["http://localhost:9017/debug/vars"]
+     data_format = "json"
+   ```
+
+3. **DataDog/New Relic** (via custom integration or StatsD bridge)
+
+4. **Custom Monitoring**:
+   ```bash
+   # Simple monitoring script
+   #!/bin/bash
+   METRICS=$(curl -s http://localhost:9017/debug/vars)
+   ACTIVE=$(echo $METRICS | jq '.connections_active')
+   FAILURES=$(echo $METRICS | jq '.hec_forwards.failure')
+
+   if [ "$ACTIVE" -gt 100 ]; then
+     echo "WARNING: High connection count: $ACTIVE"
+   fi
+
+   if [ "$FAILURES" -gt 10 ]; then
+     echo "ALERT: HEC forward failures: $FAILURES"
+   fi
+   ```
+
+**Monitoring Best Practices:**
+
+- Track `connections_active` to monitor concurrent load
+- Alert on increasing `hec_forwards.failure` rate
+- Monitor `storage_writes.failure` for disk issues
+- Track `hec_retries_total` to identify HEC reliability issues
+- Watch `lines_processed.invalid` for data quality problems
+- Calculate error rates: `failure / (success + failure)`
+
+**Zero Dependencies:**
+
+The metrics implementation uses only Go's standard library (`expvar`, `net/http`), maintaining the project's near-zero dependency philosophy while providing sufficient operational visibility.
 
 ## Development
 
