@@ -1,3 +1,5 @@
+// Package storage handles local file persistence with automatic daily rotation.
+// Log files are written in NDJSON format and rotated based on UTC dates.
 package storage
 
 import (
@@ -8,7 +10,11 @@ import (
 	"time"
 )
 
-// Manager handles file persistence with daily rotation
+// Manager handles file persistence with automatic daily rotation.
+// Files are named using the pattern: {filePrefix}-YYYY-MM-DD.ndjson.
+// Rotation occurs automatically based on UTC date changes.
+//
+// Manager is safe for concurrent use by multiple goroutines.
 type Manager struct {
 	baseDir    string
 	filePrefix string
@@ -17,7 +23,9 @@ type Manager struct {
 	mu         sync.Mutex
 }
 
-// New creates a new storage manager for the given directory with the specified file prefix
+// New creates a new Manager for the given directory with the specified file prefix.
+// The directory is created if it does not exist.
+// Returns an error if the directory cannot be created.
 func New(baseDir, filePrefix string) (*Manager, error) {
 	if err := ensureDir(baseDir); err != nil {
 		return nil, err
@@ -29,7 +37,9 @@ func New(baseDir, filePrefix string) (*Manager, error) {
 	}, nil
 }
 
-// Write writes data to the current day's file, rotating if necessary
+// Write writes data to the current day's file, rotating if the date has changed.
+// Data is appended with a newline character.
+// The connID parameter is used for logging and correlation only.
 func (m *Manager) Write(connID string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -59,7 +69,8 @@ func (m *Manager) Write(connID string, data []byte) error {
 	return err
 }
 
-// Close closes the current file
+// Close closes the current file, flushing any buffered data to disk.
+// It is safe to call Close multiple times or on a Manager with no open file.
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -76,7 +87,8 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// CurrentFile returns the path to the current day's file
+// CurrentFile returns the path to the current day's file.
+// Returns an empty string if no file has been opened yet.
 func (m *Manager) CurrentFile() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
