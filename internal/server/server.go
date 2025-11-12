@@ -4,12 +4,14 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/scottbrown/relay/internal/acl"
@@ -32,11 +34,14 @@ type Config struct {
 //
 // Server is safe for concurrent use by multiple goroutines.
 type Server struct {
-	config    Config
-	acl       *acl.List
-	storage   *storage.Manager
-	forwarder forwarder.Forwarder
-	listener  net.Listener
+	config      Config
+	acl         *acl.List
+	storage     *storage.Manager
+	forwarder   forwarder.Forwarder
+	listener    net.Listener
+	connections sync.WaitGroup // Tracks active connections for graceful shutdown
+	shutdown    chan struct{}  // Signals when shutdown is initiated
+	shutdownMu  sync.Mutex     // Protects shutdown channel from double-close
 }
 
 // isTestMode checks if we're running in test or benchmark mode
@@ -64,6 +69,7 @@ func New(config Config, aclList *acl.List, storageManager *storage.Manager, fwd 
 		acl:       aclList,
 		storage:   storageManager,
 		forwarder: fwd,
+		shutdown:  make(chan struct{}),
 	}, nil
 }
 
@@ -108,6 +114,7 @@ func (s *Server) Start() error {
 
 // Stop stops the server by closing the listener.
 // Active connections are not forcibly closed but will eventually terminate.
+// Deprecated: Use Shutdown instead for graceful connection handling.
 func (s *Server) Stop() error {
 	if s.listener != nil {
 		return s.listener.Close()
@@ -115,15 +122,82 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// Shutdown gracefully shuts down the server by first stopping new connections,
+// then waiting for active connections to complete or timeout.
+// It returns nil if all connections closed gracefully, or an error if the context
+// deadline is exceeded while waiting for connections to finish.
+func (s *Server) Shutdown(ctx context.Context) error {
+	startTime := time.Now()
+	slog.Info("initiating graceful shutdown")
+
+	// Signal shutdown to acceptLoop
+	s.shutdownMu.Lock()
+	select {
+	case <-s.shutdown:
+		// Already shutting down
+		s.shutdownMu.Unlock()
+		return nil
+	default:
+		close(s.shutdown)
+		s.shutdownMu.Unlock()
+	}
+
+	// Close listener to stop accepting new connections
+	if s.listener != nil {
+		if err := s.listener.Close(); err != nil {
+			slog.Warn("failed to close listener", "error", err)
+		}
+		slog.Info("stopped accepting new connections")
+	}
+
+	// Wait for existing connections with timeout
+	done := make(chan struct{})
+	go func() {
+		s.connections.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		duration := time.Since(startTime)
+		slog.Info("all connections closed gracefully", "duration", duration.String())
+		return nil
+	case <-ctx.Done():
+		duration := time.Since(startTime)
+		slog.Warn("shutdown timeout: some connections still active", "duration", duration.String())
+		return fmt.Errorf("shutdown timeout after %v: some connections still active", duration)
+	}
+}
+
 func (s *Server) acceptLoop() error {
 	for {
+		// Set accept deadline to periodically check shutdown channel
+		// This allows graceful shutdown without forcibly closing connections
+		if tcpListener, ok := s.listener.(*net.TCPListener); ok {
+			tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
+		}
+
 		conn, err := s.listener.Accept()
 		if err != nil {
+			// Check if shutdown was initiated
+			select {
+			case <-s.shutdown:
+				slog.Info("accept loop stopping, shutdown initiated")
+				return nil
+			default:
+			}
+
+			// Check for timeout (expected during normal operation due to deadline)
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
+
 			// Check if listener was closed (expected during shutdown)
 			if netErr, ok := err.(net.Error); ok && !netErr.Temporary() {
 				// Listener closed, exit gracefully
 				return nil
 			}
+
 			slog.Warn("accept error", "error", err)
 			continue
 		}
@@ -143,20 +217,37 @@ func (s *Server) acceptLoop() error {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
+	// Track this connection for graceful shutdown
+	s.connections.Add(1)
+	defer s.connections.Done()
 	defer conn.Close()
+
+	// Check if shutdown is in progress
+	select {
+	case <-s.shutdown:
+		slog.Info("rejecting new connection, shutdown in progress")
+		return
+	default:
+	}
 
 	connID := generateConnID()
 	clientAddr := conn.RemoteAddr().String()
+	connStartTime := time.Now()
 	slog.Info("connection accepted", "conn_id", connID, "client_addr", clientAddr)
 
 	br := bufio.NewReader(conn)
+
+	defer func() {
+		duration := time.Since(connStartTime)
+		slog.Info("connection closed", "conn_id", connID, "client_addr", clientAddr, "duration", duration.String())
+	}()
 
 	for {
 		line, err := processor.ReadLineLimited(br, s.config.MaxLineBytes)
 		if err != nil {
 			// Only exit on EOF - other errors (like oversized lines) should just skip the line
 			if err.Error() == "EOF" {
-				slog.Debug("connection closed", "conn_id", connID, "client_addr", clientAddr)
+				slog.Debug("connection EOF", "conn_id", connID, "client_addr", clientAddr)
 				return
 			}
 			slog.Warn("read error", "conn_id", connID, "client_addr", clientAddr, "error", err)

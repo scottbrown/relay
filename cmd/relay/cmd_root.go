@@ -214,17 +214,24 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			slog.Error("server error", "error", err)
 		}
-		// If any server fails, stop all
-		for _, srv := range servers {
-			if err := srv.Stop(); err != nil {
-				slog.Warn("failed to stop server", "error", err)
+		// If any server fails, gracefully shutdown all
+		slog.Info("initiating graceful shutdown of all servers")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		for i, srv := range servers {
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("server shutdown error", "listener", cfg.Listeners[i].Name, "error", err)
 			}
 		}
 	case sig := <-sigCh:
-		slog.Info("received signal, shutting down", "signal", sig.String())
-		for _, srv := range servers {
-			if err := srv.Stop(); err != nil {
-				slog.Warn("failed to stop server", "error", err)
+		slog.Info("received signal, initiating graceful shutdown", "signal", sig.String())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		for i, srv := range servers {
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("server shutdown error", "listener", cfg.Listeners[i].Name, "error", err)
 			}
 		}
 	}
