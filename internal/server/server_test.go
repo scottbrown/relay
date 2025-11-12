@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -410,5 +411,187 @@ func TestGenerateConnID(t *testing.T) {
 	// Check for hyphens in correct positions
 	if connID[8] != '-' || connID[13] != '-' || connID[18] != '-' || connID[23] != '-' {
 		t.Errorf("UUID format incorrect, expected hyphens at positions 8,13,18,23: %s", connID)
+	}
+}
+
+func TestShutdown_NoActiveConnections(t *testing.T) {
+	// Use a random available port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to get available port: %v", err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+
+	config := Config{
+		ListenAddr:   addr,
+		MaxLineBytes: 1024,
+	}
+
+	aclList, _ := acl.New("")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir, "zpa")
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Start server in goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Start()
+	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = server.Shutdown(ctx)
+	if err != nil {
+		t.Errorf("Shutdown should succeed with no active connections: %v", err)
+	}
+
+	// Check if Start returned
+	select {
+	case <-errCh:
+		// Expected - server stopped
+	case <-time.After(time.Second):
+		t.Error("server did not stop within timeout")
+	}
+}
+
+func TestShutdown_WithActiveConnections(t *testing.T) {
+	// Use a random available port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to get available port: %v", err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+
+	config := Config{
+		ListenAddr:   addr,
+		MaxLineBytes: 1024,
+	}
+
+	aclList, _ := acl.New("")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir, "zpa")
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Start server in goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Start()
+	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Establish a connection
+	conn, err := net.Dial("tcp", config.ListenAddr)
+	if err != nil {
+		t.Fatalf("failed to connect to server: %v", err)
+	}
+
+	// Send some data
+	_, err = conn.Write([]byte(`{"test": "data"}` + "\n"))
+	if err != nil {
+		t.Errorf("failed to write data: %v", err)
+	}
+
+	// Close connection
+	conn.Close()
+
+	// Give connection time to be processed
+	time.Sleep(100 * time.Millisecond)
+
+	// Shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = server.Shutdown(ctx)
+	if err != nil {
+		t.Errorf("Shutdown should succeed after connections close: %v", err)
+	}
+
+	// Check if Start returned
+	select {
+	case <-errCh:
+		// Expected - server stopped
+	case <-time.After(time.Second):
+		t.Error("server did not stop within timeout")
+	}
+}
+
+func TestShutdown_Timeout(t *testing.T) {
+	config := Config{MaxLineBytes: 1024}
+	aclList, _ := acl.New("")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir, "zpa")
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Simulate an active connection by incrementing WaitGroup
+	server.connections.Add(1)
+
+	// Don't call Done() to simulate a stuck connection
+
+	// Shutdown with very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err = server.Shutdown(ctx)
+	if err == nil {
+		t.Error("Shutdown should timeout with stuck connection")
+	}
+
+	// Clean up the WaitGroup to avoid hanging
+	server.connections.Done()
+}
+
+func TestShutdown_DoubleCall(t *testing.T) {
+	config := Config{ListenAddr: ":0", MaxLineBytes: 1024}
+	aclList, _ := acl.New("")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir, "zpa")
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// First shutdown call
+	err = server.Shutdown(ctx)
+	if err != nil {
+		t.Errorf("First Shutdown should succeed: %v", err)
+	}
+
+	// Second shutdown call (should be a no-op)
+	err = server.Shutdown(ctx)
+	if err != nil {
+		t.Errorf("Second Shutdown should succeed as no-op: %v", err)
 	}
 }

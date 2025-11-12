@@ -551,6 +551,108 @@ The circuit breaker protects the application from cascading failures when Splunk
 - Logs are always stored locally regardless of HEC state
 - Can be disabled by setting `failure_threshold: 0`
 
+### Graceful Shutdown
+
+The relay implements graceful shutdown to prevent data loss during service restarts, deployments, or terminations. When a shutdown signal is received, the service performs an orderly cleanup while ensuring all in-flight data is properly handled.
+
+**How It Works:**
+
+1. **Signal Reception**: The service listens for SIGTERM and SIGINT signals
+2. **Stop Accepting**: The listener stops accepting new connections
+3. **Wait for Connections**: Existing connections are allowed to complete naturally
+4. **Flush Batches**: Any buffered batch data is flushed to Splunk HEC
+5. **Close Resources**: Files, forwarders, and other resources are properly closed
+6. **Timeout Protection**: A 30-second timeout prevents indefinite waiting
+
+**Shutdown Sequence:**
+
+```
+# Signal received
+[INFO] received signal, initiating graceful shutdown signal=SIGTERM
+
+# Stop accepting new connections
+[INFO] initiating graceful shutdown
+[INFO] accept loop stopping, shutdown initiated
+[INFO] stopped accepting new connections
+
+# Wait for active connections (with timeout)
+[INFO] waiting for 2 active connections
+[INFO] connection closed conn_id=abc123 duration=1.5s
+[INFO] connection closed conn_id=def456 duration=800ms
+
+# All connections closed
+[INFO] all connections closed gracefully duration=1.6s
+
+# Flush and shutdown forwarders
+[INFO] shutting down forwarders
+[INFO] flushing 15 buffered events to HEC
+```
+
+**Timeout Behaviour:**
+
+If active connections don't complete within the 30-second timeout:
+
+```
+[WARN] shutdown timeout: some connections still active duration=30s
+```
+
+The service will exit after the timeout, but any data already written to local storage is preserved. Only data still in transit may be lost in this scenario.
+
+**Container Orchestration:**
+
+When running in Kubernetes, set `terminationGracePeriodSeconds` to at least 35 seconds (5 seconds longer than the shutdown timeout) to ensure the service has time to complete graceful shutdown:
+
+```yaml
+spec:
+  containers:
+    - name: relay
+      # ... other config
+  terminationGracePeriodSeconds: 35
+```
+
+For Docker Compose, use the `stop_grace_period` setting:
+
+```yaml
+services:
+  relay:
+    # ... other config
+    stop_grace_period: 35s
+```
+
+**Systemd Integration:**
+
+The default `TimeoutStopSec` in systemd is 90 seconds, which is sufficient. If you've customised this value, ensure it's at least 35 seconds:
+
+```ini
+[Service]
+# ... other settings
+TimeoutStopSec=35
+```
+
+**Benefits:**
+
+- No data loss during planned service restarts
+- Clean resource cleanup (files, network connections)
+- Proper batch flushing ensures all data reaches Splunk
+- Container orchestration friendly (Kubernetes, Docker)
+- Works seamlessly with systemd and other process managers
+
+**Testing Graceful Shutdown:**
+
+```bash
+# Start the service
+./relay --config config.yml &
+RELAY_PID=$!
+
+# Send test data
+echo '{"test": "data"}' | nc localhost 9015
+
+# Initiate graceful shutdown
+kill -TERM $RELAY_PID
+
+# Or use Ctrl+C for SIGINT
+```
+
 ### Event Format
 
 Data is forwarded to Splunk HEC as raw JSON events (one per line) without additional wrapping. The sourcetype is configurable per listener (e.g., "zpa:user:activity", "zpa:audit").
