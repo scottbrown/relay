@@ -49,15 +49,50 @@ type CircuitBreakerConfig struct {
 	HalfOpenMaxCalls int   `yaml:"half_open_max_calls"`
 }
 
-// SplunkConfig holds Splunk HEC (HTTP Event Collector) configuration.
-// It includes connection details, batching, and circuit breaker settings.
-type SplunkConfig struct {
+// HECTarget represents a single Splunk HEC endpoint target.
+// Multiple targets can be configured for high availability or multi-tenancy.
+type HECTarget struct {
+	Name           string                `yaml:"name"`
 	HECURL         string                `yaml:"hec_url"`
 	HECToken       string                `yaml:"hec_token"`
 	Gzip           *bool                 `yaml:"gzip"`
 	SourceType     string                `yaml:"source_type"`
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
+}
+
+// RoutingMode defines how logs are distributed across multiple HEC targets.
+type RoutingMode string
+
+const (
+	// RoutingModeAll sends logs to all configured targets (broadcast).
+	RoutingModeAll RoutingMode = "all"
+	// RoutingModePrimaryFailover tries primary target first, fails over to secondary on error.
+	RoutingModePrimaryFailover RoutingMode = "primary-failover"
+	// RoutingModeRoundRobin distributes logs across targets in round-robin fashion.
+	RoutingModeRoundRobin RoutingMode = "round-robin"
+)
+
+// RoutingConfig holds routing configuration for multiple HEC targets.
+type RoutingConfig struct {
+	Mode RoutingMode `yaml:"mode"`
+}
+
+// SplunkConfig holds Splunk HEC (HTTP Event Collector) configuration.
+// It includes connection details, batching, and circuit breaker settings.
+// Supports both legacy single target configuration and new multi-target configuration.
+type SplunkConfig struct {
+	// Legacy single target configuration
+	HECURL         string                `yaml:"hec_url"`
+	HECToken       string                `yaml:"hec_token"`
+	Gzip           *bool                 `yaml:"gzip"`
+	SourceType     string                `yaml:"source_type"`
+	Batch          *BatchConfig          `yaml:"batch"`
+	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
+
+	// Multi-target configuration
+	HECTargets []HECTarget    `yaml:"hec_targets"`
+	Routing    *RoutingConfig `yaml:"routing"`
 }
 
 // TLSConfig holds TLS certificate configuration for encrypted connections.
@@ -213,11 +248,15 @@ func validateConfig(cfg *Config) error {
 		hecURL := ""
 		hecToken := ""
 		sourceType := ""
+		hasMultiTarget := false
 
 		// Start with global config
 		if cfg.Splunk != nil {
 			hecURL = cfg.Splunk.HECURL
 			hecToken = cfg.Splunk.HECToken
+			if len(cfg.Splunk.HECTargets) > 0 {
+				hasMultiTarget = true
+			}
 		}
 
 		// Override with per-listener config
@@ -231,24 +270,35 @@ func validateConfig(cfg *Config) error {
 			if listener.Splunk.SourceType != "" {
 				sourceType = listener.Splunk.SourceType
 			}
+			if len(listener.Splunk.HECTargets) > 0 {
+				hasMultiTarget = true
+			}
 		}
 
-		// Validate HEC configuration
-		if hecURL != "" || hecToken != "" {
-			// Both URL and token must be specified
-			if hecURL == "" {
-				return fmt.Errorf("listener %s: HEC URL required when HEC token is specified", listener.Name)
+		// Validate single vs multi-target configuration
+		if hasMultiTarget {
+			// Validate multi-target configuration
+			if err := validateMultiTargetConfig(cfg.Splunk, listener.Splunk, listener.Name); err != nil {
+				return err
 			}
-			if hecToken == "" {
-				return fmt.Errorf("listener %s: HEC token required when HEC URL is specified", listener.Name)
-			}
-			if sourceType == "" {
-				return fmt.Errorf("listener %s: splunk.source_type is required when HEC is configured", listener.Name)
-			}
+		} else {
+			// Validate legacy single HEC configuration
+			if hecURL != "" || hecToken != "" {
+				// Both URL and token must be specified
+				if hecURL == "" {
+					return fmt.Errorf("listener %s: HEC URL required when HEC token is specified", listener.Name)
+				}
+				if hecToken == "" {
+					return fmt.Errorf("listener %s: HEC token required when HEC URL is specified", listener.Name)
+				}
+				if sourceType == "" {
+					return fmt.Errorf("listener %s: splunk.source_type is required when HEC is configured", listener.Name)
+				}
 
-			// Validate HEC URL format
-			if err := validateHECURL(hecURL); err != nil {
-				return fmt.Errorf("listener %s: invalid HEC URL: %w", listener.Name, err)
+				// Validate HEC URL format
+				if err := validateHECURL(hecURL); err != nil {
+					return fmt.Errorf("listener %s: invalid HEC URL: %w", listener.Name, err)
+				}
 			}
 		}
 
@@ -312,4 +362,91 @@ func validateHECURL(hecURL string) error {
 // This template can be used to generate a sample configuration file.
 func GetTemplate() string {
 	return configTemplate
+}
+
+// validateMultiTargetConfig validates multi-target HEC configuration
+func validateMultiTargetConfig(global, perListener *SplunkConfig, listenerName string) error {
+	// Collect targets from both global and per-listener config
+	var targets []HECTarget
+
+	if global != nil && len(global.HECTargets) > 0 {
+		// Cannot mix single and multi-target config at global level
+		if global.HECURL != "" || global.HECToken != "" {
+			return fmt.Errorf("listener %s: cannot specify both legacy HEC config (hec_url/hec_token) and hec_targets", listenerName)
+		}
+		targets = append(targets, global.HECTargets...)
+	}
+
+	if perListener != nil && len(perListener.HECTargets) > 0 {
+		// Cannot mix single and multi-target config at listener level
+		if perListener.HECURL != "" || perListener.HECToken != "" {
+			return fmt.Errorf("listener %s: cannot specify both legacy HEC config (hec_url/hec_token) and hec_targets", listenerName)
+		}
+		// Per-listener targets override global targets
+		targets = perListener.HECTargets
+	}
+
+	// Require at least one target
+	if len(targets) == 0 {
+		return fmt.Errorf("listener %s: at least one HEC target required when using multi-target configuration", listenerName)
+	}
+
+	// Track unique target names
+	targetNames := make(map[string]bool)
+
+	// Validate each target
+	for i, target := range targets {
+		if target.Name == "" {
+			return fmt.Errorf("listener %s: target %d: name is required", listenerName, i)
+		}
+
+		// Check for duplicate names
+		if targetNames[target.Name] {
+			return fmt.Errorf("listener %s: duplicate target name '%s'", listenerName, target.Name)
+		}
+		targetNames[target.Name] = true
+
+		if target.HECURL == "" {
+			return fmt.Errorf("listener %s: target '%s': hec_url is required", listenerName, target.Name)
+		}
+		if target.HECToken == "" {
+			return fmt.Errorf("listener %s: target '%s': hec_token is required", listenerName, target.Name)
+		}
+		if target.SourceType == "" {
+			return fmt.Errorf("listener %s: target '%s': source_type is required", listenerName, target.Name)
+		}
+
+		// Validate HEC URL format
+		if err := validateHECURL(target.HECURL); err != nil {
+			return fmt.Errorf("listener %s: target '%s': invalid HEC URL: %w", listenerName, target.Name, err)
+		}
+	}
+
+	// Validate routing configuration
+	var routingMode RoutingMode
+	if perListener != nil && perListener.Routing != nil {
+		routingMode = perListener.Routing.Mode
+	} else if global != nil && global.Routing != nil {
+		routingMode = global.Routing.Mode
+	} else {
+		// Default routing mode
+		routingMode = RoutingModeAll
+	}
+
+	// Validate routing mode
+	if !isValidRoutingMode(routingMode) {
+		return fmt.Errorf("listener %s: invalid routing mode '%s' (must be one of: all, primary-failover, round-robin)", listenerName, routingMode)
+	}
+
+	return nil
+}
+
+// isValidRoutingMode checks if the routing mode is valid
+func isValidRoutingMode(mode RoutingMode) bool {
+	switch mode {
+	case RoutingModeAll, RoutingModePrimaryFailover, RoutingModeRoundRobin:
+		return true
+	default:
+		return false
+	}
 }

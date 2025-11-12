@@ -31,6 +31,7 @@ We follow the format described by Michael Nygard in his article [Documenting Arc
 | [0011](0011-utc-timestamps.md) | UTC Timestamps Everywhere | Accepted |
 | [0012](0012-no-mock-libraries.md) | No Third-Party Mocking Libraries | Accepted |
 | [0013](0013-correlation-ids.md) | Correlation IDs for Request Tracing | Accepted |
+| [0014](0014-multi-target-hec.md) | Multi-Target HEC Support | Accepted |
 
 ## Creating New ADRs
 

@@ -35,7 +35,7 @@ type Server struct {
 	config    Config
 	acl       *acl.List
 	storage   *storage.Manager
-	forwarder *forwarder.HEC
+	forwarder forwarder.Forwarder
 	listener  net.Listener
 }
 
@@ -58,12 +58,12 @@ func generateConnID() string {
 // New creates a new Server with the given configuration and dependencies.
 // It initialises the server but does not start listening.
 // The acl, storage, and forwarder parameters may be nil if those features are disabled.
-func New(config Config, aclList *acl.List, storageManager *storage.Manager, hecForwarder *forwarder.HEC) (*Server, error) {
+func New(config Config, aclList *acl.List, storageManager *storage.Manager, fwd forwarder.Forwarder) (*Server, error) {
 	return &Server{
 		config:    config,
 		acl:       aclList,
 		storage:   storageManager,
-		forwarder: hecForwarder,
+		forwarder: fwd,
 	}, nil
 }
 

@@ -2,6 +2,7 @@
 # Multi-listener configuration for ZPA LSS data to Splunk HEC
 
 # Global Splunk HEC configuration (shared across all listeners unless overridden)
+# Option 1: Single HEC target (legacy)
 splunk:
   hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
   hec_token: "your-hec-token-here"
@@ -19,6 +20,23 @@ splunk:
     success_threshold: 2          # Close circuit after N consecutive successes in half-open (default: 2)
     timeout_seconds: 30           # Seconds before transitioning from open to half-open (default: 30)
     half_open_max_calls: 1        # Max concurrent test calls in half-open state (default: 1)
+
+# Option 2: Multiple HEC targets (HA/DR/Multi-tenant)
+# Uncomment to use multi-target configuration (cannot mix with single target above)
+# splunk:
+#   hec_targets:
+#     - name: primary
+#       hec_url: "https://splunk1.example.com:8088/services/collector/raw"
+#       hec_token: "primary-token"
+#       source_type: "zpa:logs"
+#       gzip: true
+#     - name: secondary
+#       hec_url: "https://splunk2.example.com:8088/services/collector/raw"
+#       hec_token: "secondary-token"
+#       source_type: "zpa:logs"
+#       gzip: true
+#   routing:
+#     mode: all  # Options: all (broadcast), primary-failover, round-robin
 
 # Global healthcheck configuration
 health_check_enabled: true

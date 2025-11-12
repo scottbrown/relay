@@ -90,12 +90,9 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	// Create servers for each listener
 	servers := make([]*server.Server, 0, len(cfg.Listeners))
 	storageManagers := make([]*storage.Manager, 0, len(cfg.Listeners))
-	forwarders := make([]*forwarder.HEC, 0, len(cfg.Listeners))
+	forwarders := make([]forwarder.Forwarder, 0, len(cfg.Listeners))
 
 	for _, listenerCfg := range cfg.Listeners {
-		// Merge global and per-listener HEC config
-		hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk)
-
 		// Initialize ACL
 		aclList, err := acl.New(listenerCfg.AllowedCIDRs)
 		if err != nil {
@@ -111,18 +108,54 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		}
 		storageManagers = append(storageManagers, storageMgr)
 
-		// Initialize HEC forwarder
-		hecForwarder := forwarder.New(hecCfg)
-		forwarders = append(forwarders, hecForwarder)
+		// Initialize HEC forwarder (single or multi-target)
+		var fwd forwarder.Forwarder
+		hasMultiTarget := false
 
-		// Health check for HEC if configured
-		if hecCfg.URL != "" && hecCfg.Token != "" {
-			slog.Info("testing Splunk HEC connectivity", "listener", listenerCfg.Name)
-			if err := hecForwarder.HealthCheck(); err != nil {
-				slog.Error("Splunk HEC health check failed", "listener", listenerCfg.Name, "error", err)
+		// Check for multi-target configuration
+		if cfg.Splunk != nil && len(cfg.Splunk.HECTargets) > 0 {
+			hasMultiTarget = true
+		}
+		if listenerCfg.Splunk != nil && len(listenerCfg.Splunk.HECTargets) > 0 {
+			hasMultiTarget = true
+		}
+
+		if hasMultiTarget {
+			// Initialize multi-target forwarder
+			targets, routingMode := getHECTargetsAndRouting(cfg.Splunk, listenerCfg.Splunk)
+			multiFwd, err := forwarder.NewMulti(targets, routingMode)
+			if err != nil {
+				slog.Error("failed to initialize multi-target HEC forwarder", "listener", listenerCfg.Name, "error", err)
 				os.Exit(1)
 			}
-			slog.Info("Splunk HEC connectivity verified", "listener", listenerCfg.Name)
+			fwd = multiFwd
+			slog.Info("initialized multi-target HEC forwarder",
+				"listener", listenerCfg.Name,
+				"targets", len(targets),
+				"mode", routingMode)
+		} else {
+			// Initialize single-target forwarder (legacy mode)
+			hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk)
+			fwd = forwarder.New(hecCfg)
+			if hecCfg.URL != "" {
+				slog.Info("initialized single-target HEC forwarder", "listener", listenerCfg.Name)
+			}
+		}
+
+		forwarders = append(forwarders, fwd)
+
+		// Health check for HEC if configured
+		if fwd != nil {
+			slog.Info("testing Splunk HEC connectivity", "listener", listenerCfg.Name)
+			if err := fwd.HealthCheck(); err != nil {
+				// Only fail if HEC is actually configured (URL not empty)
+				if hasMultiTarget || (listenerCfg.Splunk != nil && listenerCfg.Splunk.HECURL != "") || (cfg.Splunk != nil && cfg.Splunk.HECURL != "") {
+					slog.Error("Splunk HEC health check failed", "listener", listenerCfg.Name, "error", err)
+					os.Exit(1)
+				}
+			} else {
+				slog.Info("Splunk HEC connectivity verified", "listener", listenerCfg.Name)
+			}
 		}
 
 		// Initialize server
@@ -137,7 +170,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			TLSCertFile:  tlsCertFile,
 			TLSKeyFile:   tlsKeyFile,
 			MaxLineBytes: listenerCfg.MaxLineBytes,
-		}, aclList, storageMgr, hecForwarder)
+		}, aclList, storageMgr, fwd)
 		if err != nil {
 			slog.Error("failed to create server", "listener", listenerCfg.Name, "error", err)
 			os.Exit(1)
@@ -337,4 +370,28 @@ func mergeBatchConfig(global, perListener *config.BatchConfig) forwarder.BatchCo
 	}
 
 	return batchCfg
+}
+
+func getHECTargetsAndRouting(global, perListener *config.SplunkConfig) ([]config.HECTarget, config.RoutingMode) {
+	var targets []config.HECTarget
+	var routingMode config.RoutingMode
+
+	// Per-listener targets override global targets
+	if perListener != nil && len(perListener.HECTargets) > 0 {
+		targets = perListener.HECTargets
+	} else if global != nil && len(global.HECTargets) > 0 {
+		targets = global.HECTargets
+	}
+
+	// Get routing mode (per-listener overrides global)
+	if perListener != nil && perListener.Routing != nil {
+		routingMode = perListener.Routing.Mode
+	} else if global != nil && global.Routing != nil {
+		routingMode = global.Routing.Mode
+	} else {
+		// Default to "all" mode
+		routingMode = config.RoutingModeAll
+	}
+
+	return targets, routingMode
 }
