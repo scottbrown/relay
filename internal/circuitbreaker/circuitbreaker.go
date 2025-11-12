@@ -1,3 +1,6 @@
+// Package circuitbreaker implements the circuit breaker pattern for fault tolerance.
+// It prevents cascading failures by temporarily stopping requests to a failing service
+// and allows time for recovery.
 package circuitbreaker
 
 import (
@@ -8,7 +11,7 @@ import (
 )
 
 var (
-	// ErrCircuitOpen is returned when the circuit breaker is open
+	// ErrCircuitOpen is returned when the circuit breaker is open and rejecting requests.
 	ErrCircuitOpen = errors.New("circuit breaker is open")
 )
 
@@ -60,7 +63,11 @@ func DefaultConfig() Config {
 	}
 }
 
-// CircuitBreaker implements the circuit breaker pattern
+// CircuitBreaker implements the circuit breaker pattern.
+// It tracks failures and successes, automatically transitioning between states
+// to protect downstream services from overload.
+//
+// CircuitBreaker is safe for concurrent use by multiple goroutines.
 type CircuitBreaker struct {
 	mu                sync.RWMutex
 	state             State
@@ -98,7 +105,9 @@ func New(config Config) *CircuitBreaker {
 	}
 }
 
-// Call executes the given function if the circuit breaker allows it
+// Call executes the given function if the circuit breaker allows it.
+// If the circuit is open, it returns ErrCircuitOpen without calling the function.
+// The result of the function call is recorded to update the circuit breaker state.
 func (cb *CircuitBreaker) Call(fn func() error) error {
 	if !cb.canAttempt() {
 		return ErrCircuitOpen

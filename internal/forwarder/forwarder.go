@@ -1,3 +1,5 @@
+// Package forwarder handles forwarding log data to Splunk HEC endpoints.
+// It supports batching, gzip compression, retries with exponential backoff, and circuit breaker protection.
 package forwarder
 
 import (
@@ -15,7 +17,8 @@ import (
 	"github.com/scottbrown/relay/internal/circuitbreaker"
 )
 
-// BatchConfig contains batch forwarding configuration
+// BatchConfig holds configuration for batching multiple log lines before forwarding.
+// When enabled, logs are accumulated and sent together to reduce network overhead.
 type BatchConfig struct {
 	Enabled       bool
 	MaxSize       int           // Maximum lines per batch
@@ -23,7 +26,7 @@ type BatchConfig struct {
 	FlushInterval time.Duration // Maximum time before flushing
 }
 
-// Config contains configuration for the Splunk HEC forwarder
+// Config holds configuration for the Splunk HEC forwarder.
 type Config struct {
 	URL            string
 	Token          string
@@ -40,7 +43,10 @@ type batch struct {
 	timer *time.Timer
 }
 
-// HEC represents a Splunk HTTP Event Collector forwarder
+// HEC represents a Splunk HTTP Event Collector forwarder.
+// It handles sending log data to Splunk HEC with retry logic and circuit breaker protection.
+//
+// HEC is safe for concurrent use by multiple goroutines.
 type HEC struct {
 	config         Config
 	client         *http.Client
@@ -54,7 +60,8 @@ type HEC struct {
 	wg       sync.WaitGroup
 }
 
-// New creates a new HEC forwarder with the given configuration
+// New creates a new HEC forwarder with the given configuration.
+// If batching is enabled, a background worker is started to handle batch flushing.
 func New(config Config) *HEC {
 	h := &HEC{
 		config:         config,
@@ -78,7 +85,10 @@ func New(config Config) *HEC {
 	return h
 }
 
-// Forward sends data to Splunk HEC with retry logic and circuit breaker protection
+// Forward sends data to Splunk HEC with retry logic and circuit breaker protection.
+// If batching is enabled, data is added to the current batch instead of being sent immediately.
+// If HEC URL or token is empty, this method returns nil (forwarding disabled).
+// The connID parameter is used for logging and correlation.
 func (h *HEC) Forward(connID string, data []byte) error {
 	if h.config.URL == "" || h.config.Token == "" {
 		return nil // HEC forwarding disabled
@@ -97,7 +107,9 @@ func (h *HEC) Forward(connID string, data []byte) error {
 	})
 }
 
-// HealthCheck verifies that the HEC endpoint and token are valid
+// HealthCheck verifies that the HEC endpoint and token are valid.
+// It sends a GET request to the HEC health endpoint and checks for a 200 OK response.
+// Returns an error if the endpoint is unreachable, the token is invalid, or not configured.
 func (h *HEC) HealthCheck() error {
 	if h.config.URL == "" || h.config.Token == "" {
 		return errors.New("HEC URL or token not configured")
@@ -327,7 +339,10 @@ func (h *HEC) doFlush() {
 	}
 }
 
-// Shutdown gracefully shuts down the forwarder, flushing any remaining batched data
+// Shutdown gracefully shuts down the forwarder, flushing any remaining batched data.
+// If batching is disabled, this method returns immediately.
+// The provided context controls the shutdown timeout.
+// Returns an error if the shutdown times out before flushing completes.
 func (h *HEC) Shutdown(ctx context.Context) error {
 	if !h.config.Batch.Enabled {
 		return nil

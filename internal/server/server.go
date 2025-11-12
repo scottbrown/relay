@@ -1,3 +1,5 @@
+// Package server implements the TCP/TLS listener that accepts incoming log connections.
+// It coordinates ACL validation, data processing, local storage, and HEC forwarding.
 package server
 
 import (
@@ -16,7 +18,7 @@ import (
 	"github.com/scottbrown/relay/internal/storage"
 )
 
-// Config contains server configuration
+// Config holds server configuration including listen address and TLS settings.
 type Config struct {
 	ListenAddr   string
 	TLSCertFile  string
@@ -24,7 +26,11 @@ type Config struct {
 	MaxLineBytes int
 }
 
-// Server represents the TCP relay server
+// Server manages incoming TCP/TLS connections and coordinates log processing.
+// It accepts connections, validates clients against ACLs, processes log lines,
+// stores them locally, and forwards to Splunk HEC.
+//
+// Server is safe for concurrent use by multiple goroutines.
 type Server struct {
 	config    Config
 	acl       *acl.List
@@ -49,7 +55,9 @@ func generateConnID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// New creates a new server with the given configuration
+// New creates a new Server with the given configuration and dependencies.
+// It initialises the server but does not start listening.
+// The acl, storage, and forwarder parameters may be nil if those features are disabled.
 func New(config Config, aclList *acl.List, storageManager *storage.Manager, hecForwarder *forwarder.HEC) (*Server, error) {
 	return &Server{
 		config:    config,
@@ -59,7 +67,13 @@ func New(config Config, aclList *acl.List, storageManager *storage.Manager, hecF
 	}, nil
 }
 
-// Start starts the TCP/TLS server
+// Start begins accepting connections on the configured listen address.
+// It blocks until an error occurs or Stop is called.
+//
+// If TLS is configured (TLSCertFile and TLSKeyFile are set), connections are encrypted.
+// Each accepted connection is handled in a separate goroutine.
+//
+// Returns an error if the listener cannot be created or TLS setup fails.
 func (s *Server) Start() error {
 	var err error
 
@@ -92,7 +106,8 @@ func (s *Server) Start() error {
 	return s.acceptLoop()
 }
 
-// Stop stops the server
+// Stop stops the server by closing the listener.
+// Active connections are not forcibly closed but will eventually terminate.
 func (s *Server) Stop() error {
 	if s.listener != nil {
 		return s.listener.Close()

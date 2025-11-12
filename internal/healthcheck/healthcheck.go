@@ -1,3 +1,6 @@
+// Package healthcheck provides a simple TCP health check endpoint.
+// The server accepts connections and immediately closes them, allowing health monitors
+// to verify the service is running.
 package healthcheck
 
 import (
@@ -5,14 +8,16 @@ import (
 	"net"
 )
 
-// Server represents a simple TCP healthcheck server
+// Server represents a simple TCP health check server.
+// It accepts connections and immediately closes them without reading or writing data.
 type Server struct {
 	addr     string
 	listener net.Listener
 	stopChan chan struct{}
 }
 
-// New creates a new healthcheck server with the given address
+// New creates a new health check server that will listen on the given address.
+// The server is not started until Start is called.
 func New(addr string) (*Server, error) {
 	return &Server{
 		addr:     addr,
@@ -20,7 +25,9 @@ func New(addr string) (*Server, error) {
 	}, nil
 }
 
-// Start starts the healthcheck server in the background
+// Start starts the health check server in a background goroutine.
+// It returns immediately after starting the accept loop.
+// Returns an error if the listener cannot be created.
 func (s *Server) Start() error {
 	var err error
 	s.listener, err = net.Listen("tcp", s.addr)
@@ -34,7 +41,8 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop stops the healthcheck server
+// Stop stops the health check server by closing the listener.
+// It is safe to call Stop multiple times.
 func (s *Server) Stop() error {
 	close(s.stopChan)
 	if s.listener != nil {

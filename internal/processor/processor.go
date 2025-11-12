@@ -1,3 +1,5 @@
+// Package processor provides utilities for processing incoming log data.
+// It includes functions for reading size-limited lines, validating JSON, and truncating data.
 package processor
 
 import (
@@ -8,7 +10,10 @@ import (
 	"io"
 )
 
-// ReadLineLimited reads a line from the reader with a maximum byte limit
+// ReadLineLimited reads a line from the reader with a maximum byte limit.
+// If a line exceeds the limit, it drains the remaining data until a newline is found
+// and returns an error, ensuring the reader is positioned correctly for the next line.
+// Returns the line without trailing newline characters on success.
 func ReadLineLimited(br *bufio.Reader, limit int) ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -43,12 +48,14 @@ func ReadLineLimited(br *bufio.Reader, limit int) ([]byte, error) {
 	}
 }
 
-// IsValidJSON checks if the given byte slice contains valid JSON
+// IsValidJSON checks if the given byte slice contains valid JSON.
+// It uses the standard library's json.Valid function for validation.
 func IsValidJSON(data []byte) bool {
 	return json.Valid(data)
 }
 
-// Truncate truncates a byte slice to a maximum length, adding ellipsis if truncated
+// Truncate truncates a byte slice to a maximum length, adding ellipsis if truncated.
+// This is useful for logging long lines without overwhelming log output.
 func Truncate(data []byte, maxLen int) string {
 	s := string(data)
 	if len(s) <= maxLen {

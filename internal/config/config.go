@@ -1,3 +1,5 @@
+// Package config handles loading and validation of application configuration.
+// It supports YAML-based configuration files and provides sensible defaults.
 package config
 
 import (
@@ -16,15 +18,19 @@ import (
 )
 
 const (
-	DefaultMaxLineBytes       int    = 1 << 20 // 1 MiB
-	DefaultHealthCheckAddr    string = ":9099"
-	DefaultHealthCheckEnabled bool   = false
+	// DefaultMaxLineBytes is the default maximum size for a single log line (1 MiB).
+	DefaultMaxLineBytes int = 1 << 20
+	// DefaultHealthCheckAddr is the default address for the health check server.
+	DefaultHealthCheckAddr string = ":9099"
+	// DefaultHealthCheckEnabled indicates if health checks are enabled by default.
+	DefaultHealthCheckEnabled bool = false
 )
 
 //go:embed config.template.yml
 var configTemplate string
 
-// BatchConfig represents batch forwarding configuration
+// BatchConfig holds configuration for batching multiple log lines before forwarding.
+// When enabled, logs are accumulated and sent together to reduce network overhead.
 type BatchConfig struct {
 	Enabled       *bool `yaml:"enabled"`
 	MaxSize       int   `yaml:"max_size"`
@@ -32,7 +38,9 @@ type BatchConfig struct {
 	FlushInterval int   `yaml:"flush_interval_seconds"`
 }
 
-// CircuitBreakerConfig represents circuit breaker configuration
+// CircuitBreakerConfig holds configuration for the circuit breaker pattern.
+// The circuit breaker prevents cascading failures by temporarily stopping
+// requests to a failing service.
 type CircuitBreakerConfig struct {
 	Enabled          *bool `yaml:"enabled"`
 	FailureThreshold int   `yaml:"failure_threshold"`
@@ -41,7 +49,8 @@ type CircuitBreakerConfig struct {
 	HalfOpenMaxCalls int   `yaml:"half_open_max_calls"`
 }
 
-// SplunkConfig represents Splunk HEC configuration
+// SplunkConfig holds Splunk HEC (HTTP Event Collector) configuration.
+// It includes connection details, batching, and circuit breaker settings.
 type SplunkConfig struct {
 	HECURL         string                `yaml:"hec_url"`
 	HECToken       string                `yaml:"hec_token"`
@@ -51,13 +60,15 @@ type SplunkConfig struct {
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 }
 
-// TLSConfig represents TLS configuration
+// TLSConfig holds TLS certificate configuration for encrypted connections.
+// Both CertFile and KeyFile must be specified together.
 type TLSConfig struct {
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
 }
 
-// ListenerConfig represents a single listener configuration
+// ListenerConfig holds configuration for a single TCP listener.
+// Each listener can accept ZPA logs on a specific port and handle a specific log type.
 type ListenerConfig struct {
 	Name         string        `yaml:"name"`
 	ListenAddr   string        `yaml:"listen_addr"`
@@ -70,7 +81,8 @@ type ListenerConfig struct {
 	Splunk       *SplunkConfig `yaml:"splunk"`
 }
 
-// Config represents the complete application configuration
+// Config represents the complete application configuration.
+// It supports multiple listeners, each with independent settings for storage and forwarding.
 type Config struct {
 	Splunk             *SplunkConfig    `yaml:"splunk"`
 	HealthCheckEnabled bool             `yaml:"health_check_enabled"`
@@ -78,6 +90,9 @@ type Config struct {
 	Listeners          []ListenerConfig `yaml:"listeners"`
 }
 
+// LoadConfig reads and validates configuration from the specified YAML file.
+// It returns an error if the file cannot be read, parsed, or contains invalid settings.
+// All listener addresses, TLS certificates, and storage directories are validated during load.
 func LoadConfig(configFile string) (*Config, error) {
 	// Config file is now required
 	if configFile == "" {
@@ -293,6 +308,8 @@ func validateHECURL(hecURL string) error {
 	return nil
 }
 
+// GetTemplate returns the embedded YAML configuration template.
+// This template can be used to generate a sample configuration file.
 func GetTemplate() string {
 	return configTemplate
 }
