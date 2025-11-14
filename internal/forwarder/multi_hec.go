@@ -264,3 +264,21 @@ func (m *MultiHEC) Shutdown(ctx context.Context) error {
 
 	return nil
 }
+
+// UpdateConfig updates the reloadable configuration parameters for all targets in a thread-safe manner.
+// Only safe parameters (token, sourcetype, gzip) are updated.
+// Parameters that require restart (URL, batching, circuit breaker) are not affected.
+func (m *MultiHEC) UpdateConfig(cfg ReloadableConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Update all targets
+	for i, target := range m.targets {
+		target.UpdateConfig(cfg)
+		slog.Debug("updated multi-target HEC configuration",
+			"target", m.targetNames[i])
+	}
+
+	slog.Info("multi-target HEC configuration updated",
+		"targets", len(m.targets))
+}

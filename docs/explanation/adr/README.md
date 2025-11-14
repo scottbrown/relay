@@ -32,6 +32,7 @@ We follow the format described by Michael Nygard in his article [Documenting Arc
 | [0012](0012-no-mock-libraries.md) | No Third-Party Mocking Libraries | Accepted |
 | [0013](0013-correlation-ids.md) | Correlation IDs for Request Tracing | Accepted |
 | [0014](0014-multi-target-hec.md) | Multi-Target HEC Support | Accepted |
+| [0015](0015-configuration-reload.md) | Configuration Reload via SIGHUP | Accepted |
 
 ## Creating New ADRs
 
