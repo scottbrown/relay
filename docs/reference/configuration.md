@@ -17,6 +17,7 @@ This document provides comprehensive technical descriptions of all configuration
 - [Retry Configuration](#retry-configuration)
 - [Timeout Configuration](#timeout-configuration)
 - [Dead Letter Queue Configuration](#dead-letter-queue-configuration)
+- [Log Retention Configuration](#log-retention-configuration)
 - [Configuration Hierarchy](#configuration-hierarchy)
 - [Validation Rules](#validation-rules)
 - [Configuration Examples](#configuration-examples)
@@ -659,6 +660,174 @@ jq -r '.data' /var/log/relay/dlq/dlq-2025-11-14.ndjson > failed-logs.ndjson
 - Minimal disk I/O under normal operation (only on failures)
 - DLQ files accumulate during extended HEC outages
 - Monitor DLQ directory disk usage
+
+## Log Retention Configuration
+
+Configuration for automatic cleanup of old log files to prevent disk space exhaustion.
+
+Log files (both regular logs and DLQ files) can be automatically deleted or compressed based on age. This prevents unbounded disk usage growth over time. Retention policies are **optional and disabled by default**, allowing users to choose between built-in retention or external tools like logrotate.
+
+### Retention Parameters
+
+| Parameter | Type | Required | Default | Reloadable | Description |
+|-----------|------|----------|---------|------------|-------------|
+| `enabled` | boolean | No | `false` | No | Enable/disable retention policy |
+| `max_age_days` | integer | No | `30` | No | Delete files older than N days |
+| `check_interval_seconds` | integer | No | `3600` | No | How often to check for old files (in seconds) |
+| `compress_age_days` | integer | No | `0` | No | Compress files older than N days (0 = disabled) |
+
+**Scope**: Global configuration applies to all log directories (output directories and DLQ directories).
+
+**File Patterns**: Matches files with pattern `*-YYYY-MM-DD.ndjson` and `*-YYYY-MM-DD.ndjson.gz`.
+
+**Cleanup Behaviour**:
+- Files older than `max_age_days` are deleted
+- Files older than `compress_age_days` (if enabled) are compressed with gzip before deletion threshold
+- Cleanup runs immediately on startup, then periodically based on `check_interval_seconds`
+- Compressed size calculation accounts for gzip overhead
+
+**Compression**:
+- Original file is deleted after successful compression
+- Compressed files have `.gz` extension added
+- Already compressed files (.gz) are not recompressed
+- Compression savings logged for monitoring
+
+### Example: Disabled Retention (Default)
+
+Leave retention entirely to external tools:
+
+```yaml
+# No retention configuration - use logrotate or similar tools
+```
+
+### Example: Basic Retention
+
+Delete files older than 30 days, check every hour:
+
+```yaml
+retention:
+  enabled: true
+  max_age_days: 30
+  check_interval_seconds: 3600  # 1 hour
+```
+
+### Example: Retention with Compression
+
+Compress after 7 days, delete after 30 days:
+
+```yaml
+retention:
+  enabled: true
+  max_age_days: 30
+  compress_age_days: 7
+  check_interval_seconds: 3600
+```
+
+Disk space timeline:
+- Days 0-7: Files stored uncompressed
+- Days 8-30: Files compressed (typically 70-90% size reduction for log data)
+- Day 31+: Files deleted
+
+### Example: Short Retention (Testing)
+
+For development or testing environments:
+
+```yaml
+retention:
+  enabled: true
+  max_age_days: 7
+  check_interval_seconds: 1800  # 30 minutes
+```
+
+### Example: Long Retention (Compliance)
+
+For compliance or audit requirements:
+
+```yaml
+retention:
+  enabled: true
+  max_age_days: 365  # 1 year
+  compress_age_days: 90
+  check_interval_seconds: 21600  # 6 hours
+```
+
+### Alternative: External Log Rotation
+
+Instead of built-in retention, use system tools like logrotate:
+
+**Example logrotate configuration** (`/etc/logrotate.d/relay`):
+
+```
+/var/log/relay/zpa-logs/*.ndjson {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    missingok
+    create 0640 relay relay
+    dateext
+    dateformat -%Y-%m-%d
+}
+
+/var/log/relay/zpa-logs/dlq/*.ndjson {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    notifempty
+    missingok
+    create 0640 relay relay
+    dateext
+    dateformat -%Y-%m-%d
+}
+```
+
+**Benefits of logrotate**:
+- Standard Unix tool with proven reliability
+- More flexible rotation policies (size-based, time-based)
+- Can execute custom scripts before/after rotation
+- Centralised log management across system
+- Can handle log files from other applications
+
+**Benefits of built-in retention**:
+- Single application to manage
+- Unified configuration
+- No external dependencies
+- Simpler for containerised deployments
+- Consistent behaviour across platforms
+
+### Retention Operations
+
+**Monitoring Retention**:
+
+Check logs for retention activity:
+```bash
+grep "retention cleanup complete" /var/log/relay/relay.log
+# Shows files deleted, compressed, and bytes freed
+```
+
+**Disk Space Savings**:
+
+Example calculation for 100MB/day logs with 30-day retention and 7-day compression:
+- Days 0-7: 700MB uncompressed
+- Days 8-30: 23 days × 10MB (compressed at 90% reduction) = 230MB
+- **Total: 930MB vs 3000MB uncompressed (69% savings)**
+
+**Performance Impact**:
+- Cleanup runs in background goroutine
+- Does not block log processing
+- File operations use standard I/O (not memory-mapped)
+- Minimal CPU usage during cleanup
+
+**Troubleshooting**:
+
+If retention isn't working:
+1. Check `retention.enabled: true` in configuration
+2. Verify `max_age_days` is set appropriately
+3. Check relay logs for retention activity
+4. Ensure file patterns match expected format (`zpa-YYYY-MM-DD.ndjson`)
+5. Verify relay process has write permissions to log directories
 
 ## Configuration Hierarchy
 

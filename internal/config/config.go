@@ -130,6 +130,15 @@ type DLQConfig struct {
 	Dir     string `yaml:"directory"` // Directory for DLQ files
 }
 
+// RetentionConfig holds configuration for automatic cleanup of old log files.
+// Retention policies prevent disk space exhaustion by deleting or compressing old files.
+type RetentionConfig struct {
+	Enabled       bool `yaml:"enabled"`                // Enable/disable retention policy (default: false)
+	MaxAge        int  `yaml:"max_age_days"`           // Delete files older than N days (default: 30)
+	CheckInterval int  `yaml:"check_interval_seconds"` // How often to check for old files in seconds (default: 3600)
+	CompressAge   int  `yaml:"compress_age_days"`      // Compress files older than N days (0 = disabled, default: 0)
+}
+
 // ListenerConfig holds configuration for a single TCP listener.
 // Each listener can accept ZPA logs on a specific port and handle a specific log type.
 type ListenerConfig struct {
@@ -152,6 +161,7 @@ type Config struct {
 	Splunk             *SplunkConfig    `yaml:"splunk"`
 	HealthCheckEnabled bool             `yaml:"health_check_enabled"`
 	HealthCheckAddr    string           `yaml:"health_check_addr"`
+	Retention          *RetentionConfig `yaml:"retention"`
 	Listeners          []ListenerConfig `yaml:"listeners"`
 }
 
@@ -188,6 +198,17 @@ func LoadConfig(configFile string) (*Config, error) {
 		config.HealthCheckAddr = DefaultHealthCheckAddr
 	}
 
+	// Apply retention defaults if retention is enabled
+	if config.Retention != nil && config.Retention.Enabled {
+		if config.Retention.MaxAge == 0 {
+			config.Retention.MaxAge = 30 // Default: 30 days
+		}
+		if config.Retention.CheckInterval == 0 {
+			config.Retention.CheckInterval = 3600 // Default: 1 hour
+		}
+		// CompressAge defaults to 0 (disabled) if not specified
+	}
+
 	// Validate configuration
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -201,6 +222,23 @@ func validateConfig(cfg *Config) error {
 	// Require at least one listener
 	if len(cfg.Listeners) == 0 {
 		return fmt.Errorf("at least one listener is required")
+	}
+
+	// Validate retention configuration if enabled
+	if cfg.Retention != nil && cfg.Retention.Enabled {
+		if cfg.Retention.MaxAge <= 0 {
+			return fmt.Errorf("retention.max_age_days must be greater than 0")
+		}
+		if cfg.Retention.CheckInterval <= 0 {
+			return fmt.Errorf("retention.check_interval_seconds must be greater than 0")
+		}
+		if cfg.Retention.CompressAge < 0 {
+			return fmt.Errorf("retention.compress_age_days cannot be negative")
+		}
+		if cfg.Retention.CompressAge > 0 && cfg.Retention.CompressAge >= cfg.Retention.MaxAge {
+			return fmt.Errorf("retention.compress_age_days (%d) must be less than max_age_days (%d)",
+				cfg.Retention.CompressAge, cfg.Retention.MaxAge)
+		}
 	}
 
 	// Track unique listen addresses
