@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -38,14 +40,24 @@ type RetryConfig struct {
 	MaxBackoff        time.Duration // Maximum backoff duration (default: 30s)
 }
 
+// TransportConfig holds HTTP transport configuration for connection pooling.
+// These settings control how HTTP connections are managed and reused.
+type TransportConfig struct {
+	MaxIdleConns        int           // Total idle connections across all hosts (default: 100)
+	MaxIdleConnsPerHost int           // Idle connections per host (default: 10)
+	MaxConnsPerHost     int           // Maximum connections per host, 0 = unlimited (default: 0)
+	IdleConnTimeout     time.Duration // Idle connection timeout (default: 90s)
+}
+
 // Config holds configuration for the Splunk HEC forwarder.
 type Config struct {
 	URL            string
 	Token          string
 	SourceType     string
 	UseGzip        bool
-	ClientTimeout  time.Duration // HTTP client timeout for HEC requests
-	DLQ            *dlq.Writer   // Optional dead letter queue for failed forwards
+	ClientTimeout  time.Duration   // HTTP client timeout for HEC requests
+	DLQ            *dlq.Writer     // Optional dead letter queue for failed forwards
+	Transport      TransportConfig // HTTP transport configuration for connection pooling
 	Batch          BatchConfig
 	CircuitBreaker circuitbreaker.Config
 	Retry          RetryConfig
@@ -76,6 +88,55 @@ type HEC struct {
 	wg       sync.WaitGroup
 }
 
+// newHTTPClient creates an HTTP client with optimised transport settings for connection pooling.
+// Default values are production-ready for most scenarios.
+func newHTTPClient(timeout time.Duration, transportCfg TransportConfig) *http.Client {
+	// Apply defaults if not configured
+	if transportCfg.MaxIdleConns == 0 {
+		transportCfg.MaxIdleConns = 100
+	}
+	if transportCfg.MaxIdleConnsPerHost == 0 {
+		transportCfg.MaxIdleConnsPerHost = 10
+	}
+	if transportCfg.IdleConnTimeout == 0 {
+		transportCfg.IdleConnTimeout = 90 * time.Second
+	}
+
+	transport := &http.Transport{
+		// Connection pooling
+		MaxIdleConns:        transportCfg.MaxIdleConns,
+		MaxIdleConnsPerHost: transportCfg.MaxIdleConnsPerHost,
+		MaxConnsPerHost:     transportCfg.MaxConnsPerHost, // 0 = unlimited
+
+		// Timeouts
+		IdleConnTimeout:       transportCfg.IdleConnTimeout,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+
+		// Connection management
+		DisableKeepAlives:  false, // Enable keep-alive for connection reuse
+		DisableCompression: false, // Allow compression
+		ForceAttemptHTTP2:  true,  // Try HTTP/2 if server supports it
+
+		// Dial configuration
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+
+		// TLS configuration
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12, // Minimum TLS 1.2
+		},
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   timeout,
+	}
+}
+
 // New creates a new HEC forwarder with the given configuration.
 // If batching is enabled, a background worker is started to handle batch flushing.
 func New(config Config) *HEC {
@@ -87,7 +148,7 @@ func New(config Config) *HEC {
 
 	h := &HEC{
 		config:         config,
-		client:         &http.Client{Timeout: clientTimeout},
+		client:         newHTTPClient(clientTimeout, config.Transport),
 		circuitBreaker: circuitbreaker.New(config.CircuitBreaker),
 	}
 

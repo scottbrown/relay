@@ -27,6 +27,12 @@ splunk:
   #   initial_backoff_ms: 250     # Initial backoff duration in milliseconds (default: 250)
   #   backoff_multiplier: 2.0     # Exponential backoff multiplier (default: 2.0)
   #   max_backoff_seconds: 30     # Maximum backoff duration in seconds (default: 30)
+  # HTTP transport configuration for connection pooling and performance
+  # transport:
+  #   max_idle_conns: 100         # Total idle connections across all hosts (default: 100)
+  #   max_idle_conns_per_host: 10 # Idle connections per host (default: 10)
+  #   max_conns_per_host: 0       # Maximum connections per host, 0 = unlimited (default: 0)
+  #   idle_conn_timeout: 90       # Seconds before idle connections are closed (default: 90)
 
 # Option 2: Multiple HEC targets (HA/DR/Multi-tenant)
 # Uncomment to use multi-target configuration (cannot mix with single target above)
