@@ -27,6 +27,8 @@ type Config struct {
 	TLSCertFile  string
 	TLSKeyFile   string
 	MaxLineBytes int
+	ReadTimeout  time.Duration // Timeout for each read operation
+	IdleTimeout  time.Duration // Maximum idle time between reads
 }
 
 // Server manages incoming TCP/TLS connections and coordinates log processing.
@@ -255,8 +257,37 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}()
 
 	for {
+		// Set read timeout for this operation if configured
+		// Use the shorter of ReadTimeout and IdleTimeout
+		var deadline time.Time
+		if s.config.ReadTimeout > 0 && s.config.IdleTimeout > 0 {
+			// Use the shorter timeout
+			readDeadline := time.Now().Add(s.config.ReadTimeout)
+			idleDeadline := time.Now().Add(s.config.IdleTimeout)
+			if readDeadline.Before(idleDeadline) {
+				deadline = readDeadline
+			} else {
+				deadline = idleDeadline
+			}
+		} else if s.config.ReadTimeout > 0 {
+			deadline = time.Now().Add(s.config.ReadTimeout)
+		} else if s.config.IdleTimeout > 0 {
+			deadline = time.Now().Add(s.config.IdleTimeout)
+		}
+
+		if !deadline.IsZero() {
+			if err := conn.SetReadDeadline(deadline); err != nil {
+				slog.Warn("failed to set read deadline", "conn_id", connID, "error", err)
+			}
+		}
+
 		line, err := processor.ReadLineLimited(br, s.config.MaxLineBytes)
 		if err != nil {
+			// Check for timeout errors
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				slog.Warn("read timeout", "conn_id", connID, "client_addr", clientAddr)
+				return
+			}
 			// Only exit on EOF - other errors (like oversized lines) should just skip the line
 			if err.Error() == "EOF" {
 				slog.Debug("connection EOF", "conn_id", connID, "client_addr", clientAddr)

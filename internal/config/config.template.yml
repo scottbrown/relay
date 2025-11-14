@@ -7,6 +7,7 @@ splunk:
   hec_url: "https://your-instance.splunkcloud.com:8088/services/collector/raw"
   hec_token: "your-hec-token-here"
   gzip: true
+  # client_timeout_seconds: 15       # HTTP client timeout for HEC requests (default: 15)
   # Batch forwarding configuration for improved throughput
   # batch:
   #   enabled: false              # Enable/disable batch forwarding (default: false)
@@ -61,6 +62,9 @@ listeners:
     #   key_file: "/path/to/key.pem"
     allowed_cidrs: ""
     max_line_bytes: 1048576
+    # timeout:
+    #   read_seconds: 300            # Timeout for each read operation (default: none)
+    #   idle_seconds: 600            # Maximum idle time between reads (default: none)
     splunk:
       source_type: "zpa:user:activity"
 

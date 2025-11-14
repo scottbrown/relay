@@ -15,6 +15,7 @@ This document provides comprehensive technical descriptions of all configuration
 - [Batch Configuration](#batch-configuration)
 - [Circuit Breaker Configuration](#circuit-breaker-configuration)
 - [Retry Configuration](#retry-configuration)
+- [Timeout Configuration](#timeout-configuration)
 - [Configuration Hierarchy](#configuration-hierarchy)
 - [Validation Rules](#validation-rules)
 - [Configuration Examples](#configuration-examples)
@@ -78,6 +79,7 @@ Each listener accepts connections for a specific log type on a designated port.
 | `tls` | [TLSConfig](#tls-configuration) | No | - | No | TLS encryption configuration for incoming connections |
 | `allowed_cidrs` | string | No | `""` | **Yes** | Comma-separated CIDR ranges for access control (empty = allow all) |
 | `max_line_bytes` | integer | No | `1048576` (1 MiB) | No | Maximum bytes per log line (prevents DoS) |
+| `timeout` | [TimeoutConfig](#timeout-configuration) | No | - | No | Connection timeout configuration |
 | `splunk` | [SplunkConfig](#splunk-hec-configuration) | No | - | Partial* | Per-listener Splunk HEC configuration (overrides global) |
 
 \* Only `hec_token`, `source_type`, and `gzip` are reloadable.
@@ -129,6 +131,7 @@ For forwarding to a single Splunk HEC endpoint.
 | `hec_token` | string | Yes* | - | **Yes** | Splunk HEC authentication token (keep secret) |
 | `source_type` | string | Yes* | - | **Yes** | Splunk sourcetype for events (e.g., `zpa:user:activity`) |
 | `gzip` | boolean | No | `false` | **Yes** | Enable gzip compression for HEC requests |
+| `client_timeout_seconds` | integer | No | `15` | No | HTTP client timeout for HEC requests in seconds |
 | `batch` | [BatchConfig](#batch-configuration) | No | See defaults | No | Batch forwarding configuration |
 | `circuit_breaker` | [CircuitBreakerConfig](#circuit-breaker-configuration) | No | See defaults | No | Circuit breaker configuration |
 | `retry` | [RetryConfig](#retry-configuration) | No | See defaults | No | Retry configuration for failed requests |
@@ -172,6 +175,7 @@ Individual HEC target within `hec_targets` array.
 | `hec_token` | string | Yes | - | **Yes** | HEC authentication token for this target |
 | `source_type` | string | Yes | - | **Yes** | Splunk sourcetype for this target |
 | `gzip` | boolean | No | `false` | **Yes** | Enable gzip compression for this target |
+| `client_timeout_seconds` | integer | No | `15` | No | HTTP client timeout for this target in seconds |
 | `batch` | [BatchConfig](#batch-configuration) | No | See defaults | No | Per-target batch configuration |
 | `circuit_breaker` | [CircuitBreakerConfig](#circuit-breaker-configuration) | No | See defaults | No | Per-target circuit breaker configuration |
 | `retry` | [RetryConfig](#retry-configuration) | No | See defaults | No | Per-target retry configuration |
@@ -402,6 +406,125 @@ splunk:
     max_backoff_seconds: 60     # Allow long delays
 ```
 
+## Timeout Configuration
+
+Configuration for connection and HTTP client timeouts to prevent resource exhaustion and hung connections.
+
+### TCP Connection Timeouts
+
+TCP connection timeouts prevent slow or hung clients from exhausting server resources.
+
+| Parameter | Type | Required | Default | Reloadable | Description |
+|-----------|------|----------|---------|------------|-------------|
+| `read_seconds` | integer | No | None | No | Maximum seconds to wait for each read operation |
+| `idle_seconds` | integer | No | None | No | Maximum idle seconds between reads before closing connection |
+
+**Timeout Behaviour**:
+- **read_seconds**: Applied to each individual read operation. If a single read takes longer than this, the connection is closed.
+- **idle_seconds**: Maximum time connection can be idle between reads. If no data arrives within this time, the connection is closed.
+- **Both configured**: The shorter timeout is used for each read operation.
+- **Neither configured**: No timeouts applied (connections can remain idle indefinitely).
+
+**When to Use**:
+- **read_seconds**: Protect against slow clients that take too long per read
+- **idle_seconds**: Protect against idle connections that hold resources
+- **Production**: Recommend configuring both to prevent resource exhaustion
+
+### HEC Client Timeout
+
+HTTP client timeout for requests to Splunk HEC endpoints.
+
+| Parameter | Type | Required | Default | Reloadable | Description |
+|-----------|------|----------|---------|------------|-------------|
+| `client_timeout_seconds` | integer | No | `15` | No | Total HTTP request timeout including connection, send, and response |
+
+**Timeout Scope**: Covers entire HTTP request lifecycle:
+1. DNS resolution
+2. TCP connection establishment
+3. TLS handshake (if HTTPS)
+4. Sending request body
+5. Waiting for response headers
+6. Reading response body
+
+**Performance Impact**:
+- **Too short**: Requests may timeout on slow networks or busy Splunk instances
+- **Too long**: Failed requests take longer to detect, increasing latency
+- **Recommendation**: Set based on network latency + expected Splunk response time + buffer
+
+### Example: TCP Connection Timeouts
+
+Basic connection timeout configuration:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-user-activity"
+    timeout:
+      read_seconds: 300     # 5 minutes per read operation
+      idle_seconds: 600     # 10 minutes idle before disconnect
+```
+
+### Example: Aggressive Timeouts for High-Volume
+
+For high-volume environments where connections should not linger:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-user-activity"
+    timeout:
+      read_seconds: 30      # 30 seconds per read
+      idle_seconds: 60      # 1 minute idle before disconnect
+```
+
+### Example: Lenient Timeouts for Slow Clients
+
+For environments with potentially slow or intermittent clients:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-user-activity"
+    timeout:
+      read_seconds: 900     # 15 minutes per read
+      idle_seconds: 1800    # 30 minutes idle before disconnect
+```
+
+### Example: HEC Client Timeout
+
+Adjust HEC timeout for slow or distant Splunk instances:
+
+```yaml
+splunk:
+  hec_url: "https://splunk-distant.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  client_timeout_seconds: 30   # Increase from 15s default for slow network
+```
+
+Per-target HEC timeout for multi-target configuration:
+
+```yaml
+splunk:
+  hec_targets:
+    - name: "local"
+      hec_url: "https://splunk-local.example.com:8088/services/collector/raw"
+      hec_token: "local-token"
+      client_timeout_seconds: 10    # Fast local network
+    - name: "remote"
+      hec_url: "https://splunk-remote.example.com:8088/services/collector/raw"
+      hec_token: "remote-token"
+      client_timeout_seconds: 45    # Slow remote network
+```
+
 ## Configuration Hierarchy
 
 Configuration follows an inheritance hierarchy where per-listener settings override global settings.
@@ -423,6 +546,7 @@ Configuration follows an inheritance hierarchy where per-listener settings overr
 | `batch` | Yes | Per-listener values override specific fields only |
 | `circuit_breaker` | Yes | Per-listener values override specific fields only |
 | `retry` | Yes | Per-listener values override specific fields only |
+| `client_timeout_seconds` | Yes | Per-listener completely replaces global |
 | `hec_targets` | No | Per-listener completely replaces global |
 | `routing` | No | Per-listener completely replaces global |
 
@@ -522,6 +646,8 @@ Additional validation during configuration reload via SIGHUP:
    - Batch configuration must not change
    - Circuit breaker configuration must not change
    - Retry configuration must not change
+   - Timeout configuration must not change
+   - HEC client timeout must not change
 
 3. **Reloadable Parameter Validation**
    - `allowed_cidrs` must be valid CIDR notation if changed
@@ -787,7 +913,18 @@ listeners:
      backoff_multiplier: 2.0
    ```
 
-4. **Use Multi-Target HA**: Ensure redundancy
+4. **Configure Connection Timeouts**: Prevent resource exhaustion from hung connections
+   ```yaml
+   listeners:
+     - name: "user-activity"
+       timeout:
+         read_seconds: 300
+         idle_seconds: 600
+   splunk:
+     client_timeout_seconds: 30
+   ```
+
+5. **Use Multi-Target HA**: Ensure redundancy
    ```yaml
    routing:
      mode: "primary-failover"
