@@ -14,6 +14,7 @@ This document provides comprehensive technical descriptions of all configuration
 - [TLS Configuration](#tls-configuration)
 - [Batch Configuration](#batch-configuration)
 - [Circuit Breaker Configuration](#circuit-breaker-configuration)
+- [Retry Configuration](#retry-configuration)
 - [Configuration Hierarchy](#configuration-hierarchy)
 - [Validation Rules](#validation-rules)
 - [Configuration Examples](#configuration-examples)
@@ -130,6 +131,7 @@ For forwarding to a single Splunk HEC endpoint.
 | `gzip` | boolean | No | `false` | **Yes** | Enable gzip compression for HEC requests |
 | `batch` | [BatchConfig](#batch-configuration) | No | See defaults | No | Batch forwarding configuration |
 | `circuit_breaker` | [CircuitBreakerConfig](#circuit-breaker-configuration) | No | See defaults | No | Circuit breaker configuration |
+| `retry` | [RetryConfig](#retry-configuration) | No | See defaults | No | Retry configuration for failed requests |
 
 \* Required if HEC forwarding is enabled. Can be omitted entirely to disable forwarding.
 
@@ -172,6 +174,7 @@ Individual HEC target within `hec_targets` array.
 | `gzip` | boolean | No | `false` | **Yes** | Enable gzip compression for this target |
 | `batch` | [BatchConfig](#batch-configuration) | No | See defaults | No | Per-target batch configuration |
 | `circuit_breaker` | [CircuitBreakerConfig](#circuit-breaker-configuration) | No | See defaults | No | Per-target circuit breaker configuration |
+| `retry` | [RetryConfig](#retry-configuration) | No | See defaults | No | Per-target retry configuration |
 
 ### Routing Configuration
 
@@ -319,6 +322,86 @@ splunk:
     half_open_max_calls: 1     # Only 1 test request at a time
 ```
 
+## Retry Configuration
+
+Configuration for retry behaviour with exponential backoff when HEC requests fail.
+
+The retry mechanism automatically retries failed HEC requests with increasing delays.
+
+| Parameter | Type | Required | Default | Reloadable | Description |
+|-----------|------|----------|---------|------------|-------------|
+| `max_attempts` | integer | No | `5` | No | Maximum number of retry attempts per request |
+| `initial_backoff_ms` | integer | No | `250` | No | Initial backoff duration in milliseconds |
+| `backoff_multiplier` | float | No | `2.0` | No | Exponential backoff multiplier |
+| `max_backoff_seconds` | integer | No | `30` | No | Maximum backoff duration in seconds |
+
+**Backoff Calculation**:
+
+The backoff duration grows exponentially with each retry:
+```
+backoff = min(initial_backoff_ms * (backoff_multiplier ^ attempt), max_backoff_seconds * 1000)
+```
+
+**Example**: With defaults (initial: 250ms, multiplier: 2.0, max: 30s):
+- Attempt 1: No delay (initial attempt)
+- Attempt 2: 250ms delay
+- Attempt 3: 500ms delay
+- Attempt 4: 1000ms delay
+- Attempt 5: 2000ms delay
+
+**Retry Triggers**: Requests are retried when:
+- Network connection fails
+- HTTP response status is not 2xx
+- Request timeout occurs
+
+**Performance Impact**:
+- Higher `max_attempts`: More resilient but longer delay on persistent failures
+- Lower `initial_backoff_ms`: Faster recovery but higher load on failing endpoint
+- Higher `backoff_multiplier`: Faster backoff growth, reduces load on failing endpoint
+
+### Example: Retry Configuration
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  retry:
+    max_attempts: 3             # Try up to 3 times
+    initial_backoff_ms: 100     # Start with 100ms delay
+    backoff_multiplier: 2.0     # Double the delay each time
+    max_backoff_seconds: 10     # Cap delay at 10 seconds
+```
+
+### Example: Aggressive Retry for Reliable Endpoints
+
+For endpoints with intermittent issues that resolve quickly:
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  retry:
+    max_attempts: 10            # Many attempts
+    initial_backoff_ms: 50      # Fast initial retry
+    backoff_multiplier: 1.5     # Slower growth
+    max_backoff_seconds: 5      # Low maximum delay
+```
+
+### Example: Conservative Retry for Overloaded Endpoints
+
+For endpoints that need time to recover:
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  retry:
+    max_attempts: 3             # Fewer attempts
+    initial_backoff_ms: 1000    # Start with 1 second
+    backoff_multiplier: 3.0     # Aggressive backoff
+    max_backoff_seconds: 60     # Allow long delays
+```
+
 ## Configuration Hierarchy
 
 Configuration follows an inheritance hierarchy where per-listener settings override global settings.
@@ -339,6 +422,7 @@ Configuration follows an inheritance hierarchy where per-listener settings overr
 | `gzip` | Yes | Per-listener completely replaces global |
 | `batch` | Yes | Per-listener values override specific fields only |
 | `circuit_breaker` | Yes | Per-listener values override specific fields only |
+| `retry` | Yes | Per-listener values override specific fields only |
 | `hec_targets` | No | Per-listener completely replaces global |
 | `routing` | No | Per-listener completely replaces global |
 
@@ -437,6 +521,7 @@ Additional validation during configuration reload via SIGHUP:
    - TLS configuration must not change
    - Batch configuration must not change
    - Circuit breaker configuration must not change
+   - Retry configuration must not change
 
 3. **Reloadable Parameter Validation**
    - `allowed_cidrs` must be valid CIDR notation if changed
@@ -694,7 +779,15 @@ listeners:
    health_check_addr: ":9099"
    ```
 
-3. **Use Multi-Target HA**: Ensure redundancy
+3. **Tune Retry Behaviour**: Configure retries based on endpoint characteristics
+   ```yaml
+   retry:
+     max_attempts: 5
+     initial_backoff_ms: 250
+     backoff_multiplier: 2.0
+   ```
+
+4. **Use Multi-Target HA**: Ensure redundancy
    ```yaml
    routing:
      mode: "primary-failover"

@@ -377,6 +377,7 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		}
 		cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, nil)
 		cfg.Batch = mergeBatchConfig(global.Batch, nil)
+		cfg.Retry = mergeRetryConfig(global.Retry, nil)
 	}
 
 	// Override with per-listener settings
@@ -397,9 +398,11 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		if global != nil {
 			cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, perListener.CircuitBreaker)
 			cfg.Batch = mergeBatchConfig(global.Batch, perListener.Batch)
+			cfg.Retry = mergeRetryConfig(global.Retry, perListener.Retry)
 		} else {
 			cfg.CircuitBreaker = mergeCircuitBreakerConfig(nil, perListener.CircuitBreaker)
 			cfg.Batch = mergeBatchConfig(nil, perListener.Batch)
+			cfg.Retry = mergeRetryConfig(nil, perListener.Retry)
 		}
 	}
 
@@ -494,6 +497,50 @@ func mergeBatchConfig(global, perListener *config.BatchConfig) forwarder.BatchCo
 	}
 
 	return batchCfg
+}
+
+func mergeRetryConfig(global, perListener *config.RetryConfig) forwarder.RetryConfig {
+	// Start with defaults
+	retryCfg := forwarder.RetryConfig{
+		MaxAttempts:       5,
+		InitialBackoff:    250 * time.Millisecond,
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        30 * time.Second,
+	}
+
+	// Apply global settings
+	if global != nil {
+		if global.MaxAttempts > 0 {
+			retryCfg.MaxAttempts = global.MaxAttempts
+		}
+		if global.InitialBackoffMS > 0 {
+			retryCfg.InitialBackoff = time.Duration(global.InitialBackoffMS) * time.Millisecond
+		}
+		if global.BackoffMultiplier > 0 {
+			retryCfg.BackoffMultiplier = global.BackoffMultiplier
+		}
+		if global.MaxBackoffSeconds > 0 {
+			retryCfg.MaxBackoff = time.Duration(global.MaxBackoffSeconds) * time.Second
+		}
+	}
+
+	// Override with per-listener settings
+	if perListener != nil {
+		if perListener.MaxAttempts > 0 {
+			retryCfg.MaxAttempts = perListener.MaxAttempts
+		}
+		if perListener.InitialBackoffMS > 0 {
+			retryCfg.InitialBackoff = time.Duration(perListener.InitialBackoffMS) * time.Millisecond
+		}
+		if perListener.BackoffMultiplier > 0 {
+			retryCfg.BackoffMultiplier = perListener.BackoffMultiplier
+		}
+		if perListener.MaxBackoffSeconds > 0 {
+			retryCfg.MaxBackoff = time.Duration(perListener.MaxBackoffSeconds) * time.Second
+		}
+	}
+
+	return retryCfg
 }
 
 func getHECTargetsAndRouting(global, perListener *config.SplunkConfig) ([]config.HECTarget, config.RoutingMode) {

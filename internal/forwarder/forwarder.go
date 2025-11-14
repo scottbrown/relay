@@ -27,6 +27,16 @@ type BatchConfig struct {
 	FlushInterval time.Duration // Maximum time before flushing
 }
 
+// RetryConfig holds configuration for retry behaviour with exponential backoff.
+// These parameters control how many times the forwarder will retry failed HEC requests
+// and how long it will wait between attempts.
+type RetryConfig struct {
+	MaxAttempts       int           // Maximum number of retry attempts (default: 5)
+	InitialBackoff    time.Duration // Initial backoff duration (default: 250ms)
+	BackoffMultiplier float64       // Backoff multiplier for exponential backoff (default: 2.0)
+	MaxBackoff        time.Duration // Maximum backoff duration (default: 30s)
+}
+
 // Config holds configuration for the Splunk HEC forwarder.
 type Config struct {
 	URL            string
@@ -35,6 +45,7 @@ type Config struct {
 	UseGzip        bool
 	Batch          BatchConfig
 	CircuitBreaker circuitbreaker.Config
+	Retry          RetryConfig
 }
 
 // batch holds the current batch state
@@ -190,6 +201,7 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 	url := h.config.URL
 	token := h.config.Token
 	sourceType := h.config.SourceType
+	retryConfig := h.config.Retry
 	h.configMu.RUnlock()
 
 	// Pre-compress data if gzip is enabled
@@ -212,7 +224,12 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 	}
 
 	// Retry logic with exponential backoff
-	for i := 0; i < 5; i++ {
+	maxAttempts := retryConfig.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 5 // Default to 5 attempts
+	}
+
+	for i := 0; i < maxAttempts; i++ {
 		// Create a fresh request for each attempt to avoid body reuse issues
 		body := bytes.NewReader(payloadData)
 		req, err := http.NewRequest("POST", url, body)
@@ -255,14 +272,47 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 			metrics.HecRetries.Add(1)
 		}
 
-		// Don't sleep after the last attempt
-		if i < 4 {
-			time.Sleep(time.Duration(250*(1<<i)) * time.Millisecond)
+		// Calculate backoff duration with exponential growth
+		if i < maxAttempts-1 {
+			backoff := h.calculateBackoff(i, retryConfig)
+			time.Sleep(backoff)
 		}
 	}
 
 	metrics.HecForwards.Add("failure", 1)
 	return errors.New("hec send failed after retries")
+}
+
+// calculateBackoff computes the backoff duration for a retry attempt using exponential backoff.
+// The backoff is capped at the configured maximum.
+func (h *HEC) calculateBackoff(attemptNumber int, cfg RetryConfig) time.Duration {
+	initialBackoff := cfg.InitialBackoff
+	if initialBackoff == 0 {
+		initialBackoff = 250 * time.Millisecond // Default
+	}
+
+	multiplier := cfg.BackoffMultiplier
+	if multiplier == 0 {
+		multiplier = 2.0 // Default
+	}
+
+	maxBackoff := cfg.MaxBackoff
+	if maxBackoff == 0 {
+		maxBackoff = 30 * time.Second // Default
+	}
+
+	// Calculate exponential backoff: initialBackoff * (multiplier ^ attemptNumber)
+	backoff := float64(initialBackoff)
+	for i := 0; i < attemptNumber; i++ {
+		backoff *= multiplier
+	}
+
+	duration := time.Duration(backoff)
+	if duration > maxBackoff {
+		duration = maxBackoff
+	}
+
+	return duration
 }
 
 // addToBatch adds data to the current batch and triggers flush if needed

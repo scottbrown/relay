@@ -20,6 +20,12 @@ splunk:
     success_threshold: 2          # Close circuit after N consecutive successes in half-open (default: 2)
     timeout_seconds: 30           # Seconds before transitioning from open to half-open (default: 30)
     half_open_max_calls: 1        # Max concurrent test calls in half-open state (default: 1)
+  # Retry configuration for HEC request failures
+  # retry:
+  #   max_attempts: 5             # Maximum retry attempts for failed HEC requests (default: 5)
+  #   initial_backoff_ms: 250     # Initial backoff duration in milliseconds (default: 250)
+  #   backoff_multiplier: 2.0     # Exponential backoff multiplier (default: 2.0)
+  #   max_backoff_seconds: 30     # Maximum backoff duration in seconds (default: 30)
 
 # Option 2: Multiple HEC targets (HA/DR/Multi-tenant)
 # Uncomment to use multi-target configuration (cannot mix with single target above)
