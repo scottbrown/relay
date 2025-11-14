@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/scottbrown/relay/internal/acl"
 	"github.com/scottbrown/relay/internal/circuitbreaker"
 	"github.com/scottbrown/relay/internal/config"
+	"github.com/scottbrown/relay/internal/dlq"
 	"github.com/scottbrown/relay/internal/forwarder"
 	"github.com/scottbrown/relay/internal/healthcheck"
 	"github.com/scottbrown/relay/internal/metrics"
@@ -104,7 +106,7 @@ func reloadConfig(configPath string, oldCfg *config.Config, servers []*server.Se
 			}
 		} else {
 			// Legacy single-target mode
-			hecCfg := mergeHECConfig(newCfg.Splunk, newListener.Splunk)
+			hecCfg := mergeHECConfig(newCfg.Splunk, newListener.Splunk, nil) // DLQ not reloadable
 			serverCfg.ForwarderConfig.Token = hecCfg.Token
 			serverCfg.ForwarderConfig.SourceType = hecCfg.SourceType
 			serverCfg.ForwarderConfig.UseGzip = hecCfg.UseGzip
@@ -209,6 +211,21 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		}
 		storageManagers = append(storageManagers, storageMgr)
 
+		// Initialize DLQ if configured
+		var dlqWriter *dlq.Writer
+		if listenerCfg.DLQ != nil && listenerCfg.DLQ.Enabled {
+			dlqDir := listenerCfg.DLQ.Dir
+			if dlqDir == "" {
+				dlqDir = filepath.Join(listenerCfg.OutputDir, "dlq")
+			}
+			dlqWriter, err = dlq.New(dlqDir)
+			if err != nil {
+				slog.Error("failed to initialize DLQ", "listener", listenerCfg.Name, "error", err)
+				os.Exit(1)
+			}
+			slog.Info("initialized DLQ", "listener", listenerCfg.Name, "dir", dlqDir)
+		}
+
 		// Initialize HEC forwarder (single or multi-target)
 		var fwd forwarder.Forwarder
 		hasMultiTarget := false
@@ -236,7 +253,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 				"mode", routingMode)
 		} else {
 			// Initialize single-target forwarder (legacy mode)
-			hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk)
+			hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk, dlqWriter)
 			fwd = forwarder.New(hecCfg)
 			if hecCfg.URL != "" {
 				slog.Info("initialized single-target HEC forwarder", "listener", listenerCfg.Name)
@@ -378,8 +395,10 @@ shutdown:
 	}
 }
 
-func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
-	cfg := forwarder.Config{}
+func mergeHECConfig(global, perListener *config.SplunkConfig, dlqWriter *dlq.Writer) forwarder.Config {
+	cfg := forwarder.Config{
+		DLQ: dlqWriter,
+	}
 
 	// Start with global settings
 	if global != nil {

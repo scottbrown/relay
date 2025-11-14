@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/scottbrown/relay/internal/circuitbreaker"
+	"github.com/scottbrown/relay/internal/dlq"
 	"github.com/scottbrown/relay/internal/metrics"
 )
 
@@ -44,6 +45,7 @@ type Config struct {
 	SourceType     string
 	UseGzip        bool
 	ClientTimeout  time.Duration // HTTP client timeout for HEC requests
+	DLQ            *dlq.Writer   // Optional dead letter queue for failed forwards
 	Batch          BatchConfig
 	CircuitBreaker circuitbreaker.Config
 	Retry          RetryConfig
@@ -128,9 +130,18 @@ func (h *HEC) Forward(connID string, data []byte) error {
 	// Otherwise send immediately
 	slog.Debug("forwarding to HEC", "conn_id", connID, "hec_url", url)
 
-	return h.circuitBreaker.Call(func() error {
+	err := h.circuitBreaker.Call(func() error {
 		return h.sendWithRetry(connID, data)
 	})
+
+	// Write to DLQ if forwarding failed and DLQ is configured
+	if err != nil && h.config.DLQ != nil {
+		if dlqErr := h.config.DLQ.Write(connID, data, err); dlqErr != nil {
+			slog.Error("failed to write to DLQ", "conn_id", connID, "error", dlqErr)
+		}
+	}
+
+	return err
 }
 
 // HealthCheck verifies that the HEC endpoint and token are valid.
@@ -420,6 +431,13 @@ func (h *HEC) doFlush() {
 			"lines", batchSize,
 			"bytes", batchBytes,
 			"error", err)
+
+		// Write to DLQ if configured
+		if h.config.DLQ != nil {
+			if dlqErr := h.config.DLQ.Write("batch", payload, err); dlqErr != nil {
+				slog.Error("failed to write batch to DLQ", "error", dlqErr)
+			}
+		}
 	} else {
 		slog.Debug("batch forwarded",
 			"lines", batchSize,

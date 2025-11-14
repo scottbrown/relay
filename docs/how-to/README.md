@@ -8,6 +8,7 @@ How-to guides are recipes that guide you through the steps to solve a specific p
 
 - [How to Set Up TLS for Relay](setup-tls.md) - Configure TLS encryption for incoming connections
 - [How to Reload Configuration Without Restarting](reload-configuration.md) - Update HEC tokens, ACLs, and other runtime parameters via SIGHUP
+- [How to Process Dead Letter Queue Messages](process-dlq-messages.md) - Monitor, analyze, and replay failed HEC forwards
 
 ## Coming Soon
 

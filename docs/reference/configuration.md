@@ -16,6 +16,7 @@ This document provides comprehensive technical descriptions of all configuration
 - [Circuit Breaker Configuration](#circuit-breaker-configuration)
 - [Retry Configuration](#retry-configuration)
 - [Timeout Configuration](#timeout-configuration)
+- [Dead Letter Queue Configuration](#dead-letter-queue-configuration)
 - [Configuration Hierarchy](#configuration-hierarchy)
 - [Validation Rules](#validation-rules)
 - [Configuration Examples](#configuration-examples)
@@ -80,6 +81,7 @@ Each listener accepts connections for a specific log type on a designated port.
 | `allowed_cidrs` | string | No | `""` | **Yes** | Comma-separated CIDR ranges for access control (empty = allow all) |
 | `max_line_bytes` | integer | No | `1048576` (1 MiB) | No | Maximum bytes per log line (prevents DoS) |
 | `timeout` | [TimeoutConfig](#timeout-configuration) | No | - | No | Connection timeout configuration |
+| `dlq` | [DLQConfig](#dead-letter-queue-configuration) | No | - | No | Dead letter queue configuration for failed forwards |
 | `splunk` | [SplunkConfig](#splunk-hec-configuration) | No | - | Partial* | Per-listener Splunk HEC configuration (overrides global) |
 
 \* Only `hec_token`, `source_type`, and `gzip` are reloadable.
@@ -525,6 +527,139 @@ splunk:
       client_timeout_seconds: 45    # Slow remote network
 ```
 
+## Dead Letter Queue Configuration
+
+Configuration for dead letter queue (DLQ) to capture failed HEC forwards for later analysis or replay.
+
+When HEC forwards fail after all retry attempts are exhausted, the original log data is written to the DLQ with metadata about the failure. This prevents data loss during extended HEC outages and provides visibility into forwarding failures.
+
+### DLQ Parameters
+
+| Parameter | Type | Required | Default | Reloadable | Description |
+|-----------|------|----------|---------|------------|-------------|
+| `enabled` | boolean | No | `false` | No | Enable/disable dead letter queue |
+| `directory` | string | No | `{output_dir}/dlq` | No | Directory for DLQ files |
+
+**File Format**: DLQ entries are written as NDJSON files named `dlq-YYYY-MM-DD.ndjson` with daily rotation.
+
+**Entry Structure**: Each DLQ entry contains:
+```json
+{
+  "timestamp": "2025-11-14T15:30:00Z",
+  "conn_id": "connection-id",
+  "error": "error message describing the failure",
+  "data": "original log line that failed to forward"
+}
+```
+
+**When DLQ Entries are Written**:
+- After all retry attempts are exhausted
+- After circuit breaker opens (prevents forward attempts)
+- Network errors, HTTP errors, timeout errors
+- Both single-line forwards and batch forwards
+
+**DLQ vs Local Storage**:
+- **Local storage**: All received logs (successful or not)
+- **DLQ**: Only logs that failed to forward after retries
+- DLQ provides forensics and replay capability for failures
+
+### Example: Basic DLQ Configuration
+
+Enable DLQ with default directory:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-user-activity"
+    dlq:
+      enabled: true
+      # directory defaults to /var/log/relay/dlq
+    splunk:
+      hec_url: "https://splunk.example.com:8088/services/collector/raw"
+      hec_token: "token"
+```
+
+### Example: Custom DLQ Directory
+
+Specify custom DLQ directory:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-user-activity"
+    dlq:
+      enabled: true
+      directory: "/var/log/relay-dlq"  # Custom DLQ location
+    splunk:
+      hec_url: "https://splunk.example.com:8088/services/collector/raw"
+      hec_token: "token"
+```
+
+### Example: Per-Listener DLQ
+
+Enable DLQ only for critical listeners:
+
+```yaml
+listeners:
+  - name: "user-activity"
+    listen_addr: ":9015"
+    log_type: "user-activity"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-user-activity"
+    dlq:
+      enabled: true  # Critical logs - enable DLQ
+    splunk:
+      hec_url: "https://splunk.example.com:8088/services/collector/raw"
+      hec_token: "token"
+
+  - name: "app-connector-metrics"
+    listen_addr: ":9018"
+    log_type: "app-connector-metrics"
+    output_dir: "/var/log/relay"
+    file_prefix: "zpa-metrics"
+    # No DLQ - metrics can be lost
+    splunk:
+      hec_url: "https://splunk.example.com:8088/services/collector/raw"
+      hec_token: "token"
+```
+
+### DLQ Operations
+
+**Monitoring DLQ**: Check for DLQ files to detect forwarding issues:
+```bash
+ls -lh /var/log/relay/dlq/
+# dlq-2025-11-14.ndjson - presence indicates failures
+```
+
+**Analyzing Failures**: Parse DLQ entries to understand failure patterns:
+```bash
+jq -r '.error' /var/log/relay/dlq/dlq-2025-11-14.ndjson | sort | uniq -c
+# Shows error frequency distribution
+```
+
+**Replaying DLQ**: Extract original data for replay to HEC:
+```bash
+jq -r '.data' /var/log/relay/dlq/dlq-2025-11-14.ndjson > failed-logs.ndjson
+# Send failed-logs.ndjson to HEC manually or with script
+```
+
+**DLQ Retention**: Manage DLQ file retention based on operational needs:
+- Keep until successfully replayed
+- Retain for compliance/audit requirements
+- Delete after investigation complete
+
+**Performance Considerations**:
+- DLQ writes are synchronous (slight latency impact on failure path)
+- Minimal disk I/O under normal operation (only on failures)
+- DLQ files accumulate during extended HEC outages
+- Monitor DLQ directory disk usage
+
 ## Configuration Hierarchy
 
 Configuration follows an inheritance hierarchy where per-listener settings override global settings.
@@ -648,6 +783,7 @@ Additional validation during configuration reload via SIGHUP:
    - Retry configuration must not change
    - Timeout configuration must not change
    - HEC client timeout must not change
+   - DLQ configuration must not change
 
 3. **Reloadable Parameter Validation**
    - `allowed_cidrs` must be valid CIDR notation if changed
@@ -924,7 +1060,15 @@ listeners:
      client_timeout_seconds: 30
    ```
 
-5. **Use Multi-Target HA**: Ensure redundancy
+5. **Enable Dead Letter Queue**: Capture failed forwards for analysis and replay
+   ```yaml
+   listeners:
+     - name: "user-activity"
+       dlq:
+         enabled: true
+   ```
+
+6. **Use Multi-Target HA**: Ensure redundancy
    ```yaml
    routing:
      mode: "primary-failover"
