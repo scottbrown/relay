@@ -383,3 +383,185 @@ func TestHandleConnection_MultipleLines(t *testing.T) {
 		t.Error("storage should have current file after writes")
 	}
 }
+
+func TestUpdateACL(t *testing.T) {
+	config := Config{MaxLineBytes: 1024}
+	initialACL, _ := acl.New("10.0.0.0/8")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir)
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, initialACL, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Test with initial ACL
+	testIP := net.ParseIP("10.0.1.100")
+	if !server.allows(testIP) {
+		t.Error("IP 10.0.1.100 should be allowed with initial ACL")
+	}
+
+	outsideIP := net.ParseIP("192.168.1.1")
+	if server.allows(outsideIP) {
+		t.Error("IP 192.168.1.1 should not be allowed with initial ACL")
+	}
+
+	// Update ACL to allow different network
+	newACL, _ := acl.New("192.168.0.0/16")
+	server.UpdateACL(newACL)
+
+	// Test with updated ACL
+	if server.allows(testIP) {
+		t.Error("IP 10.0.1.100 should not be allowed after ACL update")
+	}
+
+	if !server.allows(outsideIP) {
+		t.Error("IP 192.168.1.1 should be allowed after ACL update")
+	}
+}
+
+func TestUpdateMaxLineBytes(t *testing.T) {
+	initialLimit := 1024
+	config := Config{MaxLineBytes: initialLimit}
+	aclList, _ := acl.New("")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir)
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Verify initial limit
+	if limit := server.getMaxLineBytes(); limit != initialLimit {
+		t.Errorf("expected initial limit %d, got %d", initialLimit, limit)
+	}
+
+	// Update limit
+	newLimit := 2048
+	server.UpdateMaxLineBytes(newLimit)
+
+	// Verify updated limit
+	if limit := server.getMaxLineBytes(); limit != newLimit {
+		t.Errorf("expected updated limit %d, got %d", newLimit, limit)
+	}
+}
+
+func TestAllows_WithACL(t *testing.T) {
+	config := Config{MaxLineBytes: 1024}
+	aclList, _ := acl.New("10.0.0.0/8,192.168.1.0/24")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir)
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"allowed from 10.0.0.0/8", "10.0.1.100", true},
+		{"allowed from 192.168.1.0/24", "192.168.1.50", true},
+		{"denied outside CIDR", "172.16.0.1", false},
+		{"denied from different /24", "192.168.2.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if result := server.allows(ip); result != tt.expected {
+				t.Errorf("allows(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAllows_NoACL(t *testing.T) {
+	config := Config{MaxLineBytes: 1024}
+	aclList, _ := acl.New("")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir)
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, aclList, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// With no ACL configured, all IPs should be allowed
+	testIPs := []string{
+		"10.0.1.100",
+		"192.168.1.50",
+		"172.16.0.1",
+		"8.8.8.8",
+	}
+
+	for _, ipStr := range testIPs {
+		t.Run(ipStr, func(t *testing.T) {
+			ip := net.ParseIP(ipStr)
+			if !server.allows(ip) {
+				t.Errorf("IP %s should be allowed when no ACL is configured", ipStr)
+			}
+		})
+	}
+}
+
+func TestUpdateACL_ThreadSafety(t *testing.T) {
+	config := Config{MaxLineBytes: 1024}
+	initialACL, _ := acl.New("10.0.0.0/8")
+	tmpDir := t.TempDir()
+	storageManager, _ := storage.New(tmpDir)
+	defer storageManager.Close()
+	hecForwarder := forwarder.New(forwarder.Config{})
+
+	server, err := New(config, initialACL, storageManager, hecForwarder)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Spawn multiple goroutines that update and check ACLs concurrently
+	done := make(chan bool)
+	testIP := net.ParseIP("10.0.1.100")
+
+	for i := 0; i < 10; i++ {
+		go func(id int) {
+			for j := 0; j < 100; j++ {
+				// Alternate between two different ACLs
+				var newACL *acl.List
+				if j%2 == 0 {
+					newACL, _ = acl.New("10.0.0.0/8")
+				} else {
+					newACL, _ = acl.New("192.168.0.0/16")
+				}
+				server.UpdateACL(newACL)
+			}
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				_ = server.allows(testIP)
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < 20; i++ {
+		<-done
+	}
+
+	// If we get here without a race condition, the test passes
+}

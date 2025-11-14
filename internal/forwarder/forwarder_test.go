@@ -403,3 +403,102 @@ func TestSendWithRetry_RequestError(t *testing.T) {
 		t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
 	}
 }
+
+func TestUpdateConfig(t *testing.T) {
+	initialConfig := Config{
+		URL:        "https://old-server.com:8088/services/collector/raw",
+		Token:      "old-token",
+		SourceType: "old:type",
+		UseGzip:    false,
+	}
+
+	hec := New(initialConfig)
+
+	// Verify initial config
+	cfg := hec.getConfig()
+	if cfg.URL != initialConfig.URL {
+		t.Errorf("expected initial URL %q, got %q", initialConfig.URL, cfg.URL)
+	}
+	if cfg.Token != initialConfig.Token {
+		t.Errorf("expected initial token %q, got %q", initialConfig.Token, cfg.Token)
+	}
+	if cfg.SourceType != initialConfig.SourceType {
+		t.Errorf("expected initial sourcetype %q, got %q", initialConfig.SourceType, cfg.SourceType)
+	}
+	if cfg.UseGzip != initialConfig.UseGzip {
+		t.Errorf("expected initial gzip %v, got %v", initialConfig.UseGzip, cfg.UseGzip)
+	}
+
+	// Update config
+	newConfig := Config{
+		URL:        "https://new-server.com:8088/services/collector/raw",
+		Token:      "new-token",
+		SourceType: "new:type",
+		UseGzip:    true,
+	}
+
+	hec.UpdateConfig(newConfig)
+
+	// Verify updated config
+	cfg = hec.getConfig()
+	if cfg.URL != newConfig.URL {
+		t.Errorf("expected updated URL %q, got %q", newConfig.URL, cfg.URL)
+	}
+	if cfg.Token != newConfig.Token {
+		t.Errorf("expected updated token %q, got %q", newConfig.Token, cfg.Token)
+	}
+	if cfg.SourceType != newConfig.SourceType {
+		t.Errorf("expected updated sourcetype %q, got %q", newConfig.SourceType, cfg.SourceType)
+	}
+	if cfg.UseGzip != newConfig.UseGzip {
+		t.Errorf("expected updated gzip %v, got %v", newConfig.UseGzip, cfg.UseGzip)
+	}
+}
+
+func TestUpdateConfig_ThreadSafety(t *testing.T) {
+	initialConfig := Config{
+		URL:        "https://server.com:8088/services/collector/raw",
+		Token:      "token",
+		SourceType: "test:type",
+		UseGzip:    false,
+	}
+
+	hec := New(initialConfig)
+
+	// Spawn multiple goroutines that update and read config concurrently
+	done := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go func(id int) {
+			for j := 0; j < 100; j++ {
+				newConfig := Config{
+					URL:        "https://server.com:8088/services/collector/raw",
+					Token:      "token",
+					SourceType: "test:type",
+					UseGzip:    j%2 == 0,
+				}
+				hec.UpdateConfig(newConfig)
+			}
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				_ = hec.getConfig()
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < 20; i++ {
+		<-done
+	}
+
+	// If we get here without a race condition, the test passes
+	cfg := hec.getConfig()
+	if cfg.URL == "" {
+		t.Error("config should not be empty after concurrent updates")
+	}
+}

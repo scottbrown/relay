@@ -71,7 +71,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	var healthSrv *healthcheck.Server
 	defer func() {
 		if healthSrv != nil {
-			healthSrv.Stop()
+			_ = healthSrv.Stop() // #nosec G104 - Error on healthcheck stop during cleanup is non-critical
 		}
 	}()
 	if cfg.HealthCheckEnabled {
@@ -117,7 +117,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 				log.Printf("configuration reloaded from %s", configFile)
 			default:
 				log.Printf("received %s, shutting down", sig)
-				srv.Stop()
+				_ = srv.Stop() // #nosec G104 - Error on stop during shutdown is non-critical, process exits anyway
 				return
 			}
 		}

@@ -28,7 +28,7 @@ func (m *Manager) Write(data []byte) error {
 
 	if day != m.curDay {
 		if m.file != nil {
-			m.file.Close()
+			_ = m.file.Close() // #nosec G104 - Error on close during rotation is non-critical
 		}
 
 		var err error
@@ -62,9 +62,10 @@ func (m *Manager) CurrentFile() string {
 
 func (m *Manager) openDayFile(day string) (*os.File, error) {
 	path := filepath.Join(m.baseDir, "zpa-"+day+".ndjson")
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// #nosec G304 - Path is controlled, uses filepath.Join with baseDir validated at creation
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 }
 
 func ensureDir(dir string) error {
-	return os.MkdirAll(dir, 0755)
+	return os.MkdirAll(dir, 0750)
 }

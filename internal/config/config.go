@@ -59,6 +59,7 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	// Read config file
+	// #nosec G304 - Config file path is provided by user via CLI flag, this is expected behaviour
 	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %v", err)

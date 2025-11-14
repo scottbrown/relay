@@ -62,7 +62,7 @@ func (s *Server) acceptLoop() {
 			}
 
 			// Immediately close the connection (complete handshake only)
-			conn.Close()
+			_ = conn.Close() // #nosec G104 - Error on close for health check connection is non-critical
 		}
 	}
 }

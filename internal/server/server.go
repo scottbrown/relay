@@ -98,7 +98,7 @@ func (s *Server) acceptLoop() error {
 		ra, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
 		if !s.allows(ra.IP) {
 			log.Printf("deny %s", ra.IP)
-			conn.Close()
+			_ = conn.Close() // #nosec G104 - Error on close for denied connection is non-critical
 			continue
 		}
 

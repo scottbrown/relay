@@ -143,12 +143,12 @@ func (h *HEC) sendWithRetry(data []byte, cfg Config) error {
 	for i := 0; i < 5; i++ {
 		resp, err := h.client.Do(req)
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			resp.Body.Close()
+			_ = resp.Body.Close() // #nosec G104 - Error on close after successful send is non-critical
 			return nil
 		}
 		if resp != nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body) // #nosec G104 - Error draining response body is non-critical
+			_ = resp.Body.Close()                  // #nosec G104 - Error on close during retry is non-critical
 		}
 
 		time.Sleep(time.Duration(250*(1<<i)) * time.Millisecond)
