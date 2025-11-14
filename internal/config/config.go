@@ -49,6 +49,16 @@ type CircuitBreakerConfig struct {
 	HalfOpenMaxCalls int   `yaml:"half_open_max_calls"`
 }
 
+// RetryConfig holds configuration for retry behaviour with exponential backoff.
+// These parameters control how many times the forwarder will retry failed HEC requests
+// and how long it will wait between attempts.
+type RetryConfig struct {
+	MaxAttempts       int     `yaml:"max_attempts"`
+	InitialBackoffMS  int     `yaml:"initial_backoff_ms"`
+	BackoffMultiplier float64 `yaml:"backoff_multiplier"`
+	MaxBackoffSeconds int     `yaml:"max_backoff_seconds"`
+}
+
 // HECTarget represents a single Splunk HEC endpoint target.
 // Multiple targets can be configured for high availability or multi-tenancy.
 type HECTarget struct {
@@ -59,6 +69,7 @@ type HECTarget struct {
 	SourceType     string                `yaml:"source_type"`
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
+	Retry          *RetryConfig          `yaml:"retry"`
 }
 
 // RoutingMode defines how logs are distributed across multiple HEC targets.
@@ -89,6 +100,7 @@ type SplunkConfig struct {
 	SourceType     string                `yaml:"source_type"`
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
+	Retry          *RetryConfig          `yaml:"retry"`
 
 	// Multi-target configuration
 	HECTargets []HECTarget    `yaml:"hec_targets"`

@@ -696,3 +696,149 @@ func TestBatch_ShutdownTimeout(t *testing.T) {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
 }
+
+func TestRetryConfig_CustomValues(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	hec := New(Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Retry: RetryConfig{
+			MaxAttempts:       3,
+			InitialBackoff:    10 * time.Millisecond,
+			BackoffMultiplier: 2.0,
+			MaxBackoff:        1 * time.Second,
+		},
+	})
+
+	err := hec.Forward("test-conn", []byte(`{"test": "data"}`))
+	if err != nil {
+		t.Errorf("expected success after retries, got error: %v", err)
+	}
+
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestRetryConfig_MaxBackoff(t *testing.T) {
+	hec := New(Config{
+		URL:        "http://example.com",
+		Token:      "test-token",
+		SourceType: "test",
+		Retry: RetryConfig{
+			MaxAttempts:       5,
+			InitialBackoff:    100 * time.Millisecond,
+			BackoffMultiplier: 10.0,
+			MaxBackoff:        200 * time.Millisecond,
+		},
+	})
+
+	// Test that backoff is capped at MaxBackoff
+	backoff := hec.calculateBackoff(0, hec.config.Retry)
+	if backoff != 100*time.Millisecond {
+		t.Errorf("expected 100ms for attempt 0, got %v", backoff)
+	}
+
+	// Attempt 1: 100ms * 10 = 1000ms, but capped at 200ms
+	backoff = hec.calculateBackoff(1, hec.config.Retry)
+	if backoff != 200*time.Millisecond {
+		t.Errorf("expected 200ms (capped), got %v", backoff)
+	}
+
+	// Attempt 2: would be 10000ms, still capped at 200ms
+	backoff = hec.calculateBackoff(2, hec.config.Retry)
+	if backoff != 200*time.Millisecond {
+		t.Errorf("expected 200ms (capped), got %v", backoff)
+	}
+}
+
+func TestRetryConfig_ExponentialBackoff(t *testing.T) {
+	hec := New(Config{
+		URL:        "http://example.com",
+		Token:      "test-token",
+		SourceType: "test",
+		Retry: RetryConfig{
+			MaxAttempts:       5,
+			InitialBackoff:    100 * time.Millisecond,
+			BackoffMultiplier: 2.0,
+			MaxBackoff:        10 * time.Second,
+		},
+	})
+
+	// Test exponential backoff calculation
+	expected := []time.Duration{
+		100 * time.Millisecond,  // 100 * 2^0
+		200 * time.Millisecond,  // 100 * 2^1
+		400 * time.Millisecond,  // 100 * 2^2
+		800 * time.Millisecond,  // 100 * 2^3
+		1600 * time.Millisecond, // 100 * 2^4
+	}
+
+	for i, exp := range expected {
+		backoff := hec.calculateBackoff(i, hec.config.Retry)
+		if backoff != exp {
+			t.Errorf("attempt %d: expected %v, got %v", i, exp, backoff)
+		}
+	}
+}
+
+func TestRetryConfig_DefaultValues(t *testing.T) {
+	hec := New(Config{
+		URL:        "http://example.com",
+		Token:      "test-token",
+		SourceType: "test",
+		// No Retry config provided, should use defaults
+	})
+
+	// Test that defaults are applied
+	backoff := hec.calculateBackoff(0, hec.config.Retry)
+	if backoff != 250*time.Millisecond {
+		t.Errorf("expected default 250ms, got %v", backoff)
+	}
+
+	backoff = hec.calculateBackoff(1, hec.config.Retry)
+	if backoff != 500*time.Millisecond {
+		t.Errorf("expected 500ms (250 * 2^1), got %v", backoff)
+	}
+}
+
+func TestRetryConfig_MaxAttempts(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	hec := New(Config{
+		URL:        server.URL,
+		Token:      "test-token",
+		SourceType: "test",
+		Retry: RetryConfig{
+			MaxAttempts:       2,
+			InitialBackoff:    10 * time.Millisecond,
+			BackoffMultiplier: 2.0,
+			MaxBackoff:        1 * time.Second,
+		},
+	})
+
+	err := hec.Forward("test-conn", []byte(`{"test": "data"}`))
+	if err == nil {
+		t.Error("expected error after max attempts")
+	}
+
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts)
+	}
+}
