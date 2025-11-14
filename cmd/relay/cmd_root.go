@@ -194,6 +194,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 	servers := make([]*server.Server, 0, len(cfg.Listeners))
 	storageManagers := make([]*storage.Manager, 0, len(cfg.Listeners))
 	forwarders := make([]forwarder.Forwarder, 0, len(cfg.Listeners))
+	retentionDirs := make([]string, 0, len(cfg.Listeners)*2) // Track directories for retention policy
 
 	for _, listenerCfg := range cfg.Listeners {
 		// Initialize ACL
@@ -210,6 +211,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		storageManagers = append(storageManagers, storageMgr)
+		retentionDirs = append(retentionDirs, listenerCfg.OutputDir)
 
 		// Initialize DLQ if configured
 		var dlqWriter *dlq.Writer
@@ -223,6 +225,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 				slog.Error("failed to initialize DLQ", "listener", listenerCfg.Name, "error", err)
 				os.Exit(1)
 			}
+			retentionDirs = append(retentionDirs, dlqDir)
 			slog.Info("initialized DLQ", "listener", listenerCfg.Name, "dir", dlqDir)
 		}
 
@@ -319,6 +322,21 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			}
 		}
 	}()
+
+	// Initialize and start retention worker if enabled
+	retentionCtx, cancelRetention := context.WithCancel(context.Background())
+	defer cancelRetention()
+
+	if cfg.Retention != nil && cfg.Retention.Enabled {
+		retentionPolicy := storage.RetentionPolicy{
+			Enabled:       true,
+			MaxAge:        cfg.Retention.MaxAge,
+			CheckInterval: time.Duration(cfg.Retention.CheckInterval) * time.Second,
+			CompressAge:   cfg.Retention.CompressAge,
+		}
+		retentionWorker := storage.NewRetentionWorker(retentionPolicy, retentionDirs...)
+		retentionWorker.Start(retentionCtx)
+	}
 
 	// Start all servers
 	serverErrCh := make(chan error, len(servers))

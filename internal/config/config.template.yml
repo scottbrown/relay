@@ -49,6 +49,15 @@ splunk:
 health_check_enabled: true
 health_check_addr: ":9099"
 
+# Log retention policy (disabled by default)
+# Automatically deletes old log files to prevent disk space exhaustion
+# Alternatively, use external tools like logrotate for more flexible control
+# retention:
+#   enabled: false                  # Enable/disable retention policy (default: false)
+#   max_age_days: 30                # Delete files older than N days (default: 30)
+#   check_interval_seconds: 3600    # How often to check for old files (default: 3600 = 1 hour)
+#   compress_age_days: 0            # Compress files older than N days, 0 = disabled (default: 0)
+
 # Listener configurations (one per ZPA log type)
 listeners:
   # User Activity logs
