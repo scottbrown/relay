@@ -3,6 +3,7 @@ package forwarder
 import (
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -840,5 +841,159 @@ func TestRetryConfig_MaxAttempts(t *testing.T) {
 
 	if attempts != 2 {
 		t.Errorf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestTransportConfig_DefaultValues(t *testing.T) {
+	hec := New(Config{
+		URL:        "http://example.com",
+		Token:      "test-token",
+		SourceType: "test",
+		// No Transport config provided, should use defaults
+	})
+
+	// Verify client was created with transport
+	if hec.client == nil {
+		t.Fatal("expected HTTP client to be created")
+	}
+
+	// Get the transport from the client
+	transport, ok := hec.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected http.Transport")
+	}
+
+	// Verify default values
+	if transport.MaxIdleConns != 100 {
+		t.Errorf("expected MaxIdleConns=100, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 10 {
+		t.Errorf("expected MaxIdleConnsPerHost=10, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.MaxConnsPerHost != 0 {
+		t.Errorf("expected MaxConnsPerHost=0 (unlimited), got %d", transport.MaxConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 90*time.Second {
+		t.Errorf("expected IdleConnTimeout=90s, got %v", transport.IdleConnTimeout)
+	}
+	if transport.DisableKeepAlives {
+		t.Error("expected keep-alives to be enabled")
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Error("expected HTTP/2 to be enabled")
+	}
+}
+
+func TestTransportConfig_CustomValues(t *testing.T) {
+	hec := New(Config{
+		URL:        "http://example.com",
+		Token:      "test-token",
+		SourceType: "test",
+		Transport: TransportConfig{
+			MaxIdleConns:        200,
+			MaxIdleConnsPerHost: 20,
+			MaxConnsPerHost:     50,
+			IdleConnTimeout:     120 * time.Second,
+		},
+	})
+
+	// Get the transport from the client
+	transport, ok := hec.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected http.Transport")
+	}
+
+	// Verify custom values
+	if transport.MaxIdleConns != 200 {
+		t.Errorf("expected MaxIdleConns=200, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 20 {
+		t.Errorf("expected MaxIdleConnsPerHost=20, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.MaxConnsPerHost != 50 {
+		t.Errorf("expected MaxConnsPerHost=50, got %d", transport.MaxConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 120*time.Second {
+		t.Errorf("expected IdleConnTimeout=120s, got %v", transport.IdleConnTimeout)
+	}
+}
+
+func TestTransportConfig_TLSMinVersion(t *testing.T) {
+	hec := New(Config{
+		URL:        "https://example.com",
+		Token:      "test-token",
+		SourceType: "test",
+	})
+
+	// Get the transport from the client
+	transport, ok := hec.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected http.Transport")
+	}
+
+	// Verify TLS 1.2 minimum version
+	if transport.TLSClientConfig == nil {
+		t.Fatal("expected TLS config to be set")
+	}
+	if transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+		t.Errorf("expected TLS 1.2 minimum, got %v", transport.TLSClientConfig.MinVersion)
+	}
+}
+
+func TestNewHTTPClient_Defaults(t *testing.T) {
+	client := newHTTPClient(15*time.Second, TransportConfig{})
+
+	if client.Timeout != 15*time.Second {
+		t.Errorf("expected timeout=15s, got %v", client.Timeout)
+	}
+
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected http.Transport")
+	}
+
+	// Verify defaults are applied
+	if transport.MaxIdleConns != 100 {
+		t.Errorf("expected MaxIdleConns=100, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 10 {
+		t.Errorf("expected MaxIdleConnsPerHost=10, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 90*time.Second {
+		t.Errorf("expected IdleConnTimeout=90s, got %v", transport.IdleConnTimeout)
+	}
+}
+
+func TestNewHTTPClient_CustomConfig(t *testing.T) {
+	transportCfg := TransportConfig{
+		MaxIdleConns:        250,
+		MaxIdleConnsPerHost: 25,
+		MaxConnsPerHost:     100,
+		IdleConnTimeout:     60 * time.Second,
+	}
+
+	client := newHTTPClient(30*time.Second, transportCfg)
+
+	if client.Timeout != 30*time.Second {
+		t.Errorf("expected timeout=30s, got %v", client.Timeout)
+	}
+
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected http.Transport")
+	}
+
+	// Verify custom values are applied
+	if transport.MaxIdleConns != 250 {
+		t.Errorf("expected MaxIdleConns=250, got %d", transport.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != 25 {
+		t.Errorf("expected MaxIdleConnsPerHost=25, got %d", transport.MaxIdleConnsPerHost)
+	}
+	if transport.MaxConnsPerHost != 100 {
+		t.Errorf("expected MaxConnsPerHost=100, got %d", transport.MaxConnsPerHost)
+	}
+	if transport.IdleConnTimeout != 60*time.Second {
+		t.Errorf("expected IdleConnTimeout=60s, got %v", transport.IdleConnTimeout)
 	}
 }

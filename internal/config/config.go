@@ -59,6 +59,15 @@ type RetryConfig struct {
 	MaxBackoffSeconds int     `yaml:"max_backoff_seconds"`
 }
 
+// TransportConfig holds HTTP transport configuration for connection pooling and timeouts.
+// These settings control how HTTP connections are managed and reused for HEC forwarding.
+type TransportConfig struct {
+	MaxIdleConns        int `yaml:"max_idle_conns"`          // Total idle connections across all hosts (default: 100)
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"` // Idle connections per host (default: 10)
+	MaxConnsPerHost     int `yaml:"max_conns_per_host"`      // Maximum connections per host, 0 = unlimited (default: 0)
+	IdleConnTimeout     int `yaml:"idle_conn_timeout"`       // Seconds before idle connections are closed (default: 90)
+}
+
 // HECTarget represents a single Splunk HEC endpoint target.
 // Multiple targets can be configured for high availability or multi-tenancy.
 type HECTarget struct {
@@ -71,6 +80,7 @@ type HECTarget struct {
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 	Retry          *RetryConfig          `yaml:"retry"`
+	Transport      *TransportConfig      `yaml:"transport"`
 }
 
 // RoutingMode defines how logs are distributed across multiple HEC targets.
@@ -103,6 +113,7 @@ type SplunkConfig struct {
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 	Retry          *RetryConfig          `yaml:"retry"`
+	Transport      *TransportConfig      `yaml:"transport"`
 
 	// Multi-target configuration
 	HECTargets []HECTarget    `yaml:"hec_targets"`

@@ -431,6 +431,7 @@ func mergeHECConfig(global, perListener *config.SplunkConfig, dlqWriter *dlq.Wri
 		cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, nil)
 		cfg.Batch = mergeBatchConfig(global.Batch, nil)
 		cfg.Retry = mergeRetryConfig(global.Retry, nil)
+		cfg.Transport = mergeTransportConfig(global.Transport, nil)
 	}
 
 	// Override with per-listener settings
@@ -455,10 +456,12 @@ func mergeHECConfig(global, perListener *config.SplunkConfig, dlqWriter *dlq.Wri
 			cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, perListener.CircuitBreaker)
 			cfg.Batch = mergeBatchConfig(global.Batch, perListener.Batch)
 			cfg.Retry = mergeRetryConfig(global.Retry, perListener.Retry)
+			cfg.Transport = mergeTransportConfig(global.Transport, perListener.Transport)
 		} else {
 			cfg.CircuitBreaker = mergeCircuitBreakerConfig(nil, perListener.CircuitBreaker)
 			cfg.Batch = mergeBatchConfig(nil, perListener.Batch)
 			cfg.Retry = mergeRetryConfig(nil, perListener.Retry)
+			cfg.Transport = mergeTransportConfig(nil, perListener.Transport)
 		}
 	}
 
@@ -597,6 +600,50 @@ func mergeRetryConfig(global, perListener *config.RetryConfig) forwarder.RetryCo
 	}
 
 	return retryCfg
+}
+
+func mergeTransportConfig(global, perListener *config.TransportConfig) forwarder.TransportConfig {
+	// Start with defaults
+	transportCfg := forwarder.TransportConfig{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		MaxConnsPerHost:     0,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
+	// Apply global settings
+	if global != nil {
+		if global.MaxIdleConns > 0 {
+			transportCfg.MaxIdleConns = global.MaxIdleConns
+		}
+		if global.MaxIdleConnsPerHost > 0 {
+			transportCfg.MaxIdleConnsPerHost = global.MaxIdleConnsPerHost
+		}
+		if global.MaxConnsPerHost >= 0 {
+			transportCfg.MaxConnsPerHost = global.MaxConnsPerHost
+		}
+		if global.IdleConnTimeout > 0 {
+			transportCfg.IdleConnTimeout = time.Duration(global.IdleConnTimeout) * time.Second
+		}
+	}
+
+	// Override with per-listener settings
+	if perListener != nil {
+		if perListener.MaxIdleConns > 0 {
+			transportCfg.MaxIdleConns = perListener.MaxIdleConns
+		}
+		if perListener.MaxIdleConnsPerHost > 0 {
+			transportCfg.MaxIdleConnsPerHost = perListener.MaxIdleConnsPerHost
+		}
+		if perListener.MaxConnsPerHost >= 0 {
+			transportCfg.MaxConnsPerHost = perListener.MaxConnsPerHost
+		}
+		if perListener.IdleConnTimeout > 0 {
+			transportCfg.IdleConnTimeout = time.Duration(perListener.IdleConnTimeout) * time.Second
+		}
+	}
+
+	return transportCfg
 }
 
 func getHECTargetsAndRouting(global, perListener *config.SplunkConfig) ([]config.HECTarget, config.RoutingMode) {

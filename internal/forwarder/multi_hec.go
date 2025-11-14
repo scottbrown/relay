@@ -103,6 +103,29 @@ func NewMulti(targets []config.HECTarget, mode config.RoutingMode) (*MultiHEC, e
 		}
 		hecConfig.CircuitBreaker = cbConfig
 
+		// Convert transport config
+		transportConfig := TransportConfig{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			MaxConnsPerHost:     0,
+			IdleConnTimeout:     90 * time.Second,
+		}
+		if target.Transport != nil {
+			if target.Transport.MaxIdleConns > 0 {
+				transportConfig.MaxIdleConns = target.Transport.MaxIdleConns
+			}
+			if target.Transport.MaxIdleConnsPerHost > 0 {
+				transportConfig.MaxIdleConnsPerHost = target.Transport.MaxIdleConnsPerHost
+			}
+			if target.Transport.MaxConnsPerHost >= 0 {
+				transportConfig.MaxConnsPerHost = target.Transport.MaxConnsPerHost
+			}
+			if target.Transport.IdleConnTimeout > 0 {
+				transportConfig.IdleConnTimeout = time.Duration(target.Transport.IdleConnTimeout) * time.Second
+			}
+		}
+		hecConfig.Transport = transportConfig
+
 		hec := New(hecConfig)
 		hecInstances = append(hecInstances, hec)
 		targetNames = append(targetNames, target.Name)

@@ -409,6 +409,134 @@ splunk:
     max_backoff_seconds: 60     # Allow long delays
 ```
 
+## HTTP Transport Configuration
+
+Configuration for HTTP client transport layer, including connection pooling and keep-alive settings.
+
+Connection pooling significantly improves performance by reusing TCP connections instead of establishing new ones for each request. This reduces latency and network overhead, especially for high-throughput scenarios.
+
+| Parameter | Type | Required | Default | Reloadable | Description |
+|-----------|------|----------|---------|------------|-------------|
+| `max_idle_conns` | integer | No | `100` | No | Maximum idle connections across all hosts |
+| `max_idle_conns_per_host` | integer | No | `10` | No | Maximum idle connections per host |
+| `max_conns_per_host` | integer | No | `0` | No | Maximum total connections per host (0 = unlimited) |
+| `idle_conn_timeout` | integer | No | `90` | No | Seconds before idle connections are closed |
+
+**Connection Pooling Behaviour**:
+- **Connection Reuse**: HTTP connections are reused across requests to the same host
+- **Keep-Alive**: Enabled by default for connection reuse
+- **HTTP/2 Support**: Automatically attempts HTTP/2 if server supports it
+- **TLS**: Minimum TLS 1.2 enforced for HTTPS endpoints
+
+**Performance Impact**:
+
+Without connection pooling (each request):
+- TCP handshake: ~50ms
+- TLS handshake: ~100ms
+- HTTP request: ~50ms
+- **Total: ~200ms per request**
+
+With connection pooling (after first request):
+- Connection reused
+- HTTP request: ~50ms
+- **Total: ~50ms per request (75% latency reduction)**
+
+**Tuning Guidelines**:
+
+- **High throughput**: Increase `max_idle_conns` and `max_idle_conns_per_host`
+- **Low latency**: Keep connections alive longer with higher `idle_conn_timeout`
+- **Resource constrained**: Reduce idle connection limits
+- **Multiple targets**: Set `max_idle_conns` high enough for all targets
+
+### Example: Default Transport (Recommended)
+
+Use defaults for most scenarios:
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  # Transport uses production-ready defaults:
+  # max_idle_conns: 100
+  # max_idle_conns_per_host: 10
+  # idle_conn_timeout: 90s
+```
+
+### Example: High Throughput Configuration
+
+For high-volume environments with many concurrent requests:
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  transport:
+    max_idle_conns: 200           # More connections overall
+    max_idle_conns_per_host: 50   # More per-host connections
+    max_conns_per_host: 0         # Unlimited (default)
+    idle_conn_timeout: 120        # Keep connections alive longer
+```
+
+### Example: Resource Constrained Configuration
+
+For environments with limited resources:
+
+```yaml
+splunk:
+  hec_url: "https://splunk.example.com:8088/services/collector/raw"
+  hec_token: "token"
+  transport:
+    max_idle_conns: 20            # Fewer total connections
+    max_idle_conns_per_host: 2    # Fewer per-host connections
+    max_conns_per_host: 10        # Limit concurrent connections
+    idle_conn_timeout: 30         # Close idle connections sooner
+```
+
+### Example: Per-Target Transport (Multi-Target)
+
+Different transport settings for different targets:
+
+```yaml
+splunk:
+  hec_targets:
+    - name: "high-priority"
+      hec_url: "https://splunk1.example.com:8088/services/collector/raw"
+      hec_token: "token1"
+      source_type: "zpa:logs"
+      transport:
+        max_idle_conns_per_host: 20  # More connections for critical target
+        idle_conn_timeout: 120
+
+    - name: "standard"
+      hec_url: "https://splunk2.example.com:8088/services/collector/raw"
+      hec_token: "token2"
+      source_type: "zpa:logs"
+      # Uses default transport settings
+```
+
+### HTTP/2 Multiplexing
+
+HTTP/2 automatically multiplexes multiple requests over a single connection, providing better performance than HTTP/1.1 connection pooling:
+
+- **Enabled by default**: `ForceAttemptHTTP2: true`
+- **Automatic fallback**: Falls back to HTTP/1.1 if server doesn't support HTTP/2
+- **Single connection**: Multiple concurrent requests share one TCP connection
+- **Lower latency**: No connection setup overhead after first request
+- **Better efficiency**: Reduces TCP congestion and head-of-line blocking
+
+**Performance Comparison**:
+- HTTP/1.1 with pooling: Good performance with connection reuse
+- HTTP/2 with multiplexing: Better performance, fewer connections required
+
+### TLS Configuration
+
+Transport automatically configures TLS for HTTPS endpoints:
+
+- **Minimum TLS 1.2**: Enforced for security
+- **Certificate verification**: Standard system certificate pool
+- **TLS handshake timeout**: 10 seconds
+- **Session resumption**: Enabled by Go's TLS implementation
+
 ## Timeout Configuration
 
 Configuration for connection and HTTP client timeouts to prevent resource exhaustion and hung connections.
