@@ -5,6 +5,14 @@ import (
 	"context"
 )
 
+// ReloadableConfig holds configuration parameters that can be safely reloaded at runtime.
+// These parameters do not require restarting connections or forwarders.
+type ReloadableConfig struct {
+	Token      string
+	SourceType string
+	UseGzip    bool
+}
+
 // Forwarder defines the interface for forwarding log data to one or more HEC endpoints.
 // Implementations can be single-target (HEC) or multi-target (MultiHEC) forwarders.
 type Forwarder interface {
@@ -21,4 +29,9 @@ type Forwarder interface {
 	// The provided context controls the shutdown timeout.
 	// Returns an error if the shutdown times out before flushing completes.
 	Shutdown(ctx context.Context) error
+
+	// UpdateConfig updates the reloadable configuration parameters in a thread-safe manner.
+	// Only safe parameters (token, sourcetype, gzip) are updated.
+	// Parameters that require restart (URL, batching, circuit breaker) are not affected.
+	UpdateConfig(cfg ReloadableConfig)
 }

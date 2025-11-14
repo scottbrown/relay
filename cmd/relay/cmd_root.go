@@ -33,6 +33,97 @@ var rootCmd = &cobra.Command{
 	Run:     handleRootCmd,
 }
 
+// reloadConfig reloads the configuration file and updates all servers with reloadable settings
+func reloadConfig(configPath string, oldCfg *config.Config, servers []*server.Server) error {
+	// Load new configuration
+	newCfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Verify listener count matches (cannot add/remove listeners without restart)
+	if len(newCfg.Listeners) != len(oldCfg.Listeners) {
+		return fmt.Errorf("cannot change number of listeners (requires restart): had %d, now %d", len(oldCfg.Listeners), len(newCfg.Listeners))
+	}
+
+	// Update each server with reloadable configuration
+	for i := range servers {
+		oldListener := oldCfg.Listeners[i]
+		newListener := newCfg.Listeners[i]
+
+		// Verify non-reloadable parameters haven't changed
+		if oldListener.Name != newListener.Name {
+			return fmt.Errorf("listener name changed (requires restart): %s -> %s", oldListener.Name, newListener.Name)
+		}
+		if oldListener.ListenAddr != newListener.ListenAddr {
+			return fmt.Errorf("listener %s: listen address changed (requires restart)", oldListener.Name)
+		}
+		if oldListener.OutputDir != newListener.OutputDir {
+			return fmt.Errorf("listener %s: output directory changed (requires restart)", oldListener.Name)
+		}
+		if oldListener.MaxLineBytes != newListener.MaxLineBytes {
+			return fmt.Errorf("listener %s: max line bytes changed (requires restart)", oldListener.Name)
+		}
+
+		// Check TLS changes
+		oldTLS := oldListener.TLS != nil
+		newTLS := newListener.TLS != nil
+		if oldTLS != newTLS {
+			return fmt.Errorf("listener %s: TLS configuration changed (requires restart)", oldListener.Name)
+		}
+		if oldTLS && newTLS {
+			if oldListener.TLS.CertFile != newListener.TLS.CertFile || oldListener.TLS.KeyFile != newListener.TLS.KeyFile {
+				return fmt.Errorf("listener %s: TLS certificate/key changed (requires restart)", oldListener.Name)
+			}
+		}
+
+		// Build reloadable server config
+		serverCfg := server.ReloadableConfig{
+			AllowedCIDRs: newListener.AllowedCIDRs,
+		}
+
+		// Determine forwarder config (handle both single and multi-target)
+		hasMultiTarget := false
+		if newCfg.Splunk != nil && len(newCfg.Splunk.HECTargets) > 0 {
+			hasMultiTarget = true
+		}
+		if newListener.Splunk != nil && len(newListener.Splunk.HECTargets) > 0 {
+			hasMultiTarget = true
+		}
+
+		if hasMultiTarget {
+			// Multi-target mode: extract first target's config as representative
+			// (UpdateConfig will apply to all targets in MultiHEC)
+			targets, _ := getHECTargetsAndRouting(newCfg.Splunk, newListener.Splunk)
+			if len(targets) > 0 {
+				serverCfg.ForwarderConfig.Token = targets[0].HECToken
+				serverCfg.ForwarderConfig.SourceType = targets[0].SourceType
+				if targets[0].Gzip != nil {
+					serverCfg.ForwarderConfig.UseGzip = *targets[0].Gzip
+				}
+			}
+		} else {
+			// Legacy single-target mode
+			hecCfg := mergeHECConfig(newCfg.Splunk, newListener.Splunk)
+			serverCfg.ForwarderConfig.Token = hecCfg.Token
+			serverCfg.ForwarderConfig.SourceType = hecCfg.SourceType
+			serverCfg.ForwarderConfig.UseGzip = hecCfg.UseGzip
+		}
+
+		// Apply reloadable configuration to server
+		if err := servers[i].UpdateConfig(serverCfg); err != nil {
+			return fmt.Errorf("listener %s: failed to update config: %w", oldListener.Name, err)
+		}
+
+		slog.Info("reloaded configuration for listener", "listener", oldListener.Name)
+	}
+
+	// Update the old config reference with new config (for next reload)
+	*oldCfg = *newCfg
+
+	return nil
+}
+
 func handleRootCmd(cmd *cobra.Command, args []string) {
 	// Initialize structured logging
 	var level slog.Level
@@ -213,38 +304,54 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		}(srv, name)
 	}
 
-	// Signal handling
+	// Signal handling for shutdown and reload
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigCh)
 
-	// Wait for shutdown signal or server error
-	select {
-	case err := <-serverErrCh:
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			slog.Error("server error", "error", err)
-		}
-		// If any server fails, gracefully shutdown all
-		slog.Info("initiating graceful shutdown of all servers")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		for i, srv := range servers {
-			if err := srv.Shutdown(shutdownCtx); err != nil {
-				slog.Warn("server shutdown error", "listener", cfg.Listeners[i].Name, "error", err)
+	// Main event loop for signals and server errors
+	for {
+		select {
+		case err := <-serverErrCh:
+			if err != nil && !errors.Is(err, net.ErrClosed) {
+				slog.Error("server error", "error", err)
 			}
-		}
-	case sig := <-sigCh:
-		slog.Info("received signal, initiating graceful shutdown", "signal", sig.String())
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+			// If any server fails, gracefully shutdown all
+			slog.Info("initiating graceful shutdown of all servers")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
-		for i, srv := range servers {
-			if err := srv.Shutdown(shutdownCtx); err != nil {
-				slog.Warn("server shutdown error", "listener", cfg.Listeners[i].Name, "error", err)
+			for i, srv := range servers {
+				if err := srv.Shutdown(shutdownCtx); err != nil {
+					slog.Warn("server shutdown error", "listener", cfg.Listeners[i].Name, "error", err)
+				}
+			}
+			goto shutdown
+		case sig := <-sigCh:
+			switch sig {
+			case syscall.SIGHUP:
+				slog.Info("received SIGHUP, reloading configuration")
+				if err := reloadConfig(configFile, cfg, servers); err != nil {
+					slog.Error("failed to reload configuration", "error", err)
+				} else {
+					slog.Info("configuration reloaded successfully")
+				}
+			case syscall.SIGINT, syscall.SIGTERM:
+				slog.Info("received signal, initiating graceful shutdown", "signal", sig.String())
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				for i, srv := range servers {
+					if err := srv.Shutdown(shutdownCtx); err != nil {
+						slog.Warn("server shutdown error", "listener", cfg.Listeners[i].Name, "error", err)
+					}
+				}
+				goto shutdown
 			}
 		}
 	}
+
+shutdown:
 
 	// Shutdown forwarders with timeout
 	slog.Info("shutting down forwarders")

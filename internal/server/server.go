@@ -37,6 +37,7 @@ type Config struct {
 type Server struct {
 	config      Config
 	acl         *acl.List
+	aclMu       sync.RWMutex // Protects ACL for config reloads
 	storage     *storage.Manager
 	forwarder   forwarder.Forwarder
 	listener    net.Listener
@@ -205,7 +206,11 @@ func (s *Server) acceptLoop() error {
 
 		// Check ACL
 		ra, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
-		if !s.acl.Allows(ra.IP) {
+		s.aclMu.RLock()
+		allowed := s.acl.Allows(ra.IP)
+		s.aclMu.RUnlock()
+
+		if !allowed {
 			metrics.ConnectionsRejected.Add(1)
 			slog.Warn("connection denied by ACL", "client_ip", ra.IP.String())
 			if err := conn.Close(); err != nil {
@@ -291,4 +296,36 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 		}(lineCopy, connID)
 	}
+}
+
+// ReloadableConfig holds configuration parameters that can be safely reloaded at runtime.
+type ReloadableConfig struct {
+	AllowedCIDRs    string
+	ForwarderConfig forwarder.ReloadableConfig
+}
+
+// UpdateConfig updates the reloadable configuration parameters in a thread-safe manner.
+// Only safe parameters (ACL CIDRs, HEC token, sourcetype, gzip) are updated.
+// Parameters that require restart (listen address, TLS, storage, max line bytes) are not affected.
+func (s *Server) UpdateConfig(cfg ReloadableConfig) error {
+	// Update ACL if CIDRs changed
+	if cfg.AllowedCIDRs != "" {
+		newACL, err := acl.New(cfg.AllowedCIDRs)
+		if err != nil {
+			return fmt.Errorf("failed to create new ACL: %w", err)
+		}
+
+		s.aclMu.Lock()
+		s.acl = newACL
+		s.aclMu.Unlock()
+
+		slog.Info("ACL configuration updated", "cidrs", cfg.AllowedCIDRs)
+	}
+
+	// Update forwarder configuration
+	if s.forwarder != nil {
+		s.forwarder.UpdateConfig(cfg.ForwarderConfig)
+	}
+
+	return nil
 }

@@ -15,6 +15,7 @@ Relay is a high-performance TCP relay service that receives Zscaler ZPA LSS (Log
 - **TLS Support**: Optional TLS encryption for incoming connections
 - **Access Control**: CIDR-based IP filtering per listener
 - **YAML Configuration**: Required configuration file for all settings
+- **Runtime Configuration Reload**: Update HEC tokens, ACLs, and other parameters without restart via SIGHUP
 - **Template Generation**: Built-in configuration template generator
 - **Health Checks**: Smoke testing for Splunk HEC connectivity
 - **Operational Metrics**: Built-in instrumentation via expvar for monitoring service health
@@ -492,6 +493,97 @@ Options:
 
 ```bash
 go run cmd/relay/main.go --config config.yml
+```
+
+### Runtime Configuration Reload
+
+The relay service supports reloading configuration at runtime via the `SIGHUP` signal, allowing you to update certain parameters without restarting the service and interrupting active connections.
+
+#### Reloadable Parameters
+
+The following configuration parameters can be safely reloaded:
+
+- **HEC Token** (`hec_token`) - Update Splunk HEC authentication token
+- **HEC Source Type** (`source_type`) - Change the Splunk source type
+- **HEC Gzip** (`gzip`) - Enable/disable gzip compression for HEC forwarding
+- **ACL CIDRs** (`allowed_cidrs`) - Update allowed IP address ranges
+
+#### Non-Reloadable Parameters (Require Restart)
+
+The following parameters cannot be changed without a service restart:
+
+- Listen address (`listen_addr`)
+- TLS certificate/key (`tls.cert_file`, `tls.key_file`)
+- Output directory (`output_dir`)
+- Max line bytes (`max_line_bytes`)
+- File prefix (`file_prefix`)
+- Log type (`log_type`)
+- Batch configuration (`batch`)
+- Circuit breaker configuration (`circuit_breaker`)
+
+#### How to Reload Configuration
+
+1. **Edit the configuration file** with your desired changes:
+   ```bash
+   vim config.yml
+   ```
+
+2. **Send SIGHUP signal** to reload:
+   ```bash
+   # Using kill with PID
+   kill -HUP <pid>
+
+   # Using pkill with process name
+   pkill -HUP relay
+
+   # Using systemctl (if running as a service)
+   systemctl reload relay
+   ```
+
+3. **Check logs** for confirmation:
+   ```json
+   {"time":"2025-11-14T10:30:00.000Z","level":"INFO","msg":"received SIGHUP, reloading configuration"}
+   {"time":"2025-11-14T10:30:00.001Z","level":"INFO","msg":"ACL configuration updated","cidrs":"10.0.0.0/8"}
+   {"time":"2025-11-14T10:30:00.001Z","level":"INFO","msg":"HEC configuration updated","sourcetype":"zpa:user:activity","gzip":true}
+   {"time":"2025-11-14T10:30:00.001Z","level":"INFO","msg":"reloaded configuration for listener","listener":"user-activity"}
+   {"time":"2025-11-14T10:30:00.002Z","level":"INFO","msg":"configuration reloaded successfully"}
+   ```
+
+#### Validation and Error Handling
+
+The reload operation validates the new configuration before applying it:
+
+- **Validation failures**: The old configuration remains active, and an error is logged
+- **Parameter restrictions**: Attempting to change non-reloadable parameters will fail with an error
+- **Partial failures**: If any listener fails to reload, the entire reload operation is aborted
+- **Thread-safe**: Configuration updates are applied atomically without affecting active connections
+
+#### Example Reload Workflow
+
+```bash
+# Terminal 1: Start relay with initial config
+./relay --config config.yml
+
+# Terminal 2: Update HEC token and reload
+sed -i 's/old-token-123/new-token-456/g' config.yml
+pkill -HUP relay
+
+# Check logs in Terminal 1 for success message
+# [INFO] received SIGHUP, reloading configuration
+# [INFO] configuration reloaded successfully
+```
+
+#### Error Examples
+
+```json
+# Attempting to change listen address (not allowed)
+{"time":"2025-11-14T10:30:00.000Z","level":"ERROR","msg":"failed to reload configuration","error":"listener user-activity: listen address changed (requires restart)"}
+
+# Invalid CIDR in new config
+{"time":"2025-11-14T10:30:00.000Z","level":"ERROR","msg":"failed to reload configuration","error":"listener user-activity: failed to create new ACL: invalid CIDR address: invalid-cidr"}
+
+# Configuration file not found
+{"time":"2025-11-14T10:30:00.000Z","level":"ERROR","msg":"failed to reload configuration","error":"failed to load configuration: configuration file not found: config.yml"}
 ```
 
 ## Architecture

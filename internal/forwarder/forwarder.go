@@ -50,6 +50,7 @@ type batch struct {
 // HEC is safe for concurrent use by multiple goroutines.
 type HEC struct {
 	config         Config
+	configMu       sync.RWMutex // Protects reloadable config fields
 	client         *http.Client
 	circuitBreaker *circuitbreaker.CircuitBreaker
 
@@ -91,17 +92,23 @@ func New(config Config) *HEC {
 // If HEC URL or token is empty, this method returns nil (forwarding disabled).
 // The connID parameter is used for logging and correlation.
 func (h *HEC) Forward(connID string, data []byte) error {
-	if h.config.URL == "" || h.config.Token == "" {
+	h.configMu.RLock()
+	url := h.config.URL
+	token := h.config.Token
+	batchEnabled := h.config.Batch.Enabled
+	h.configMu.RUnlock()
+
+	if url == "" || token == "" {
 		return nil // HEC forwarding disabled
 	}
 
 	// If batching is enabled, add to batch
-	if h.config.Batch.Enabled {
+	if batchEnabled {
 		return h.addToBatch(data)
 	}
 
 	// Otherwise send immediately
-	slog.Debug("forwarding to HEC", "conn_id", connID, "hec_url", h.config.URL)
+	slog.Debug("forwarding to HEC", "conn_id", connID, "hec_url", url)
 
 	return h.circuitBreaker.Call(func() error {
 		return h.sendWithRetry(connID, data)
@@ -112,7 +119,12 @@ func (h *HEC) Forward(connID string, data []byte) error {
 // It sends a GET request to the HEC health endpoint and checks for a 200 OK response.
 // Returns an error if the endpoint is unreachable, the token is invalid, or not configured.
 func (h *HEC) HealthCheck() error {
-	if h.config.URL == "" || h.config.Token == "" {
+	h.configMu.RLock()
+	url := h.config.URL
+	token := h.config.Token
+	h.configMu.RUnlock()
+
+	if url == "" || token == "" {
 		return errors.New("HEC URL or token not configured")
 	}
 
@@ -124,7 +136,7 @@ func (h *HEC) HealthCheck() error {
 		return err
 	}
 
-	req.Header.Set("Authorization", "Splunk "+h.config.Token)
+	req.Header.Set("Authorization", "Splunk "+token)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -144,7 +156,9 @@ func (h *HEC) HealthCheck() error {
 
 // getHealthURL converts collector URL to health endpoint URL
 func (h *HEC) getHealthURL() string {
+	h.configMu.RLock()
 	url := h.config.URL
+	h.configMu.RUnlock()
 
 	// Replace common collector endpoints with health endpoint
 	if strings.Contains(url, "/services/collector/raw") {
@@ -170,11 +184,19 @@ func (h *HEC) getHealthURL() string {
 }
 
 func (h *HEC) sendWithRetry(connID string, data []byte) error {
+	// Read config with read lock
+	h.configMu.RLock()
+	useGzip := h.config.UseGzip
+	url := h.config.URL
+	token := h.config.Token
+	sourceType := h.config.SourceType
+	h.configMu.RUnlock()
+
 	// Pre-compress data if gzip is enabled
 	var payloadData []byte
 	var contentEnc string
 
-	if h.config.UseGzip {
+	if useGzip {
 		var buf bytes.Buffer
 		zw := gzip.NewWriter(&buf)
 		if _, err := zw.Write(data); err != nil {
@@ -193,12 +215,12 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 	for i := 0; i < 5; i++ {
 		// Create a fresh request for each attempt to avoid body reuse issues
 		body := bytes.NewReader(payloadData)
-		req, err := http.NewRequest("POST", h.config.URL, body)
+		req, err := http.NewRequest("POST", url, body)
 		if err != nil {
 			return err
 		}
 
-		req.Header.Set("Authorization", "Splunk "+h.config.Token)
+		req.Header.Set("Authorization", "Splunk "+token)
 		req.Header.Set("Content-Type", "text/plain")
 		req.Header.Set("X-Correlation-ID", connID)
 		if contentEnc != "" {
@@ -206,9 +228,9 @@ func (h *HEC) sendWithRetry(connID string, data []byte) error {
 		}
 
 		// Add sourcetype to query parameters if specified
-		if h.config.SourceType != "" {
+		if sourceType != "" {
 			q := req.URL.Query()
-			q.Set("sourcetype", h.config.SourceType)
+			q.Set("sourcetype", sourceType)
 			req.URL.RawQuery = q.Encode()
 		}
 
@@ -374,4 +396,20 @@ func (h *HEC) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// UpdateConfig updates the reloadable configuration parameters in a thread-safe manner.
+// Only safe parameters (token, sourcetype, gzip) are updated.
+// Parameters that require restart (URL, batching, circuit breaker) are not affected.
+func (h *HEC) UpdateConfig(cfg ReloadableConfig) {
+	h.configMu.Lock()
+	defer h.configMu.Unlock()
+
+	h.config.Token = cfg.Token
+	h.config.SourceType = cfg.SourceType
+	h.config.UseGzip = cfg.UseGzip
+
+	slog.Info("HEC configuration updated",
+		"sourcetype", cfg.SourceType,
+		"gzip", cfg.UseGzip)
 }
