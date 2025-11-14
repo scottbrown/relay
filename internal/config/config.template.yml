@@ -65,6 +65,9 @@ listeners:
     # timeout:
     #   read_seconds: 300            # Timeout for each read operation (default: none)
     #   idle_seconds: 600            # Maximum idle time between reads (default: none)
+    # dlq:
+    #   enabled: true                # Enable dead letter queue for failed HEC forwards (default: false)
+    #   directory: "./zpa-logs/dlq"  # Directory for DLQ files (default: {output_dir}/dlq)
     splunk:
       source_type: "zpa:user:activity"
 

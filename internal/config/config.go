@@ -123,6 +123,13 @@ type TimeoutConfig struct {
 	IdleSeconds int `yaml:"idle_seconds"` // Maximum time between reads before closing connection
 }
 
+// DLQConfig holds dead letter queue configuration for failed HEC forwards.
+// Failed messages are written to NDJSON files for later analysis or replay.
+type DLQConfig struct {
+	Enabled bool   `yaml:"enabled"`   // Enable/disable DLQ (default: false)
+	Dir     string `yaml:"directory"` // Directory for DLQ files
+}
+
 // ListenerConfig holds configuration for a single TCP listener.
 // Each listener can accept ZPA logs on a specific port and handle a specific log type.
 type ListenerConfig struct {
@@ -135,6 +142,7 @@ type ListenerConfig struct {
 	AllowedCIDRs string         `yaml:"allowed_cidrs"`
 	MaxLineBytes int            `yaml:"max_line_bytes"`
 	Timeout      *TimeoutConfig `yaml:"timeout"`
+	DLQ          *DLQConfig     `yaml:"dlq"`
 	Splunk       *SplunkConfig  `yaml:"splunk"`
 }
 

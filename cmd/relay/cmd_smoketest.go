@@ -35,7 +35,7 @@ func performSmokeTest(cfg *config.Config) {
 		fmt.Printf("Listener: %s (%s)\n", listenerCfg.Name, listenerCfg.LogType)
 
 		// Merge global and per-listener HEC config
-		hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk)
+		hecCfg := mergeHECConfig(cfg.Splunk, listenerCfg.Splunk, nil) // No DLQ for smoke test
 
 		if hecCfg.URL == "" {
 			fmt.Printf("  ⚠️  Warning: Splunk HEC URL is not configured for this listener\n\n")
