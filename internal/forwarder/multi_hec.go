@@ -54,6 +54,11 @@ func NewMulti(targets []config.HECTarget, mode config.RoutingMode) (*MultiHEC, e
 			hecConfig.UseGzip = *target.Gzip
 		}
 
+		// Apply client timeout
+		if target.ClientTimeout > 0 {
+			hecConfig.ClientTimeout = time.Duration(target.ClientTimeout) * time.Second
+		}
+
 		// Convert batch config
 		batchConfig := BatchConfig{
 			Enabled:       false,

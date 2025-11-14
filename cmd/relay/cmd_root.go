@@ -266,12 +266,25 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			tlsKeyFile = listenerCfg.TLS.KeyFile
 		}
 
-		srv, err := server.New(server.Config{
+		// Build server config with timeouts
+		serverCfg := server.Config{
 			ListenAddr:   listenerCfg.ListenAddr,
 			TLSCertFile:  tlsCertFile,
 			TLSKeyFile:   tlsKeyFile,
 			MaxLineBytes: listenerCfg.MaxLineBytes,
-		}, aclList, storageMgr, fwd)
+		}
+
+		// Apply connection timeouts if configured
+		if listenerCfg.Timeout != nil {
+			if listenerCfg.Timeout.ReadSeconds > 0 {
+				serverCfg.ReadTimeout = time.Duration(listenerCfg.Timeout.ReadSeconds) * time.Second
+			}
+			if listenerCfg.Timeout.IdleSeconds > 0 {
+				serverCfg.IdleTimeout = time.Duration(listenerCfg.Timeout.IdleSeconds) * time.Second
+			}
+		}
+
+		srv, err := server.New(serverCfg, aclList, storageMgr, fwd)
 		if err != nil {
 			slog.Error("failed to create server", "listener", listenerCfg.Name, "error", err)
 			os.Exit(1)
@@ -375,6 +388,9 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		if global.Gzip != nil {
 			cfg.UseGzip = *global.Gzip
 		}
+		if global.ClientTimeout > 0 {
+			cfg.ClientTimeout = time.Duration(global.ClientTimeout) * time.Second
+		}
 		cfg.CircuitBreaker = mergeCircuitBreakerConfig(global.CircuitBreaker, nil)
 		cfg.Batch = mergeBatchConfig(global.Batch, nil)
 		cfg.Retry = mergeRetryConfig(global.Retry, nil)
@@ -393,6 +409,9 @@ func mergeHECConfig(global, perListener *config.SplunkConfig) forwarder.Config {
 		}
 		if perListener.Gzip != nil {
 			cfg.UseGzip = *perListener.Gzip
+		}
+		if perListener.ClientTimeout > 0 {
+			cfg.ClientTimeout = time.Duration(perListener.ClientTimeout) * time.Second
 		}
 		// Merge circuit breaker config (per-listener can override global)
 		if global != nil {

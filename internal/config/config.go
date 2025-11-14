@@ -67,6 +67,7 @@ type HECTarget struct {
 	HECToken       string                `yaml:"hec_token"`
 	Gzip           *bool                 `yaml:"gzip"`
 	SourceType     string                `yaml:"source_type"`
+	ClientTimeout  int                   `yaml:"client_timeout_seconds"` // HTTP client timeout for HEC requests
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 	Retry          *RetryConfig          `yaml:"retry"`
@@ -98,6 +99,7 @@ type SplunkConfig struct {
 	HECToken       string                `yaml:"hec_token"`
 	Gzip           *bool                 `yaml:"gzip"`
 	SourceType     string                `yaml:"source_type"`
+	ClientTimeout  int                   `yaml:"client_timeout_seconds"` // HTTP client timeout for HEC requests
 	Batch          *BatchConfig          `yaml:"batch"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker"`
 	Retry          *RetryConfig          `yaml:"retry"`
@@ -114,18 +116,26 @@ type TLSConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
+// TimeoutConfig holds timeout configuration for TCP connections.
+// These timeouts prevent resource exhaustion from slow or hung connections.
+type TimeoutConfig struct {
+	ReadSeconds int `yaml:"read_seconds"` // Maximum time to wait for each read operation
+	IdleSeconds int `yaml:"idle_seconds"` // Maximum time between reads before closing connection
+}
+
 // ListenerConfig holds configuration for a single TCP listener.
 // Each listener can accept ZPA logs on a specific port and handle a specific log type.
 type ListenerConfig struct {
-	Name         string        `yaml:"name"`
-	ListenAddr   string        `yaml:"listen_addr"`
-	LogType      string        `yaml:"log_type"`
-	OutputDir    string        `yaml:"output_dir"`
-	FilePrefix   string        `yaml:"file_prefix"`
-	TLS          *TLSConfig    `yaml:"tls"`
-	AllowedCIDRs string        `yaml:"allowed_cidrs"`
-	MaxLineBytes int           `yaml:"max_line_bytes"`
-	Splunk       *SplunkConfig `yaml:"splunk"`
+	Name         string         `yaml:"name"`
+	ListenAddr   string         `yaml:"listen_addr"`
+	LogType      string         `yaml:"log_type"`
+	OutputDir    string         `yaml:"output_dir"`
+	FilePrefix   string         `yaml:"file_prefix"`
+	TLS          *TLSConfig     `yaml:"tls"`
+	AllowedCIDRs string         `yaml:"allowed_cidrs"`
+	MaxLineBytes int            `yaml:"max_line_bytes"`
+	Timeout      *TimeoutConfig `yaml:"timeout"`
+	Splunk       *SplunkConfig  `yaml:"splunk"`
 }
 
 // Config represents the complete application configuration.

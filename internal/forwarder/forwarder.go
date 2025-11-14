@@ -43,6 +43,7 @@ type Config struct {
 	Token          string
 	SourceType     string
 	UseGzip        bool
+	ClientTimeout  time.Duration // HTTP client timeout for HEC requests
 	Batch          BatchConfig
 	CircuitBreaker circuitbreaker.Config
 	Retry          RetryConfig
@@ -76,9 +77,15 @@ type HEC struct {
 // New creates a new HEC forwarder with the given configuration.
 // If batching is enabled, a background worker is started to handle batch flushing.
 func New(config Config) *HEC {
+	// Use configured timeout, default to 15 seconds if not set
+	clientTimeout := config.ClientTimeout
+	if clientTimeout == 0 {
+		clientTimeout = 15 * time.Second
+	}
+
 	h := &HEC{
 		config:         config,
-		client:         &http.Client{Timeout: 15 * time.Second},
+		client:         &http.Client{Timeout: clientTimeout},
 		circuitBreaker: circuitbreaker.New(config.CircuitBreaker),
 	}
 
