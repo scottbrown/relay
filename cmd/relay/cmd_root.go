@@ -15,6 +15,7 @@ import (
 
 	"github.com/scottbrown/relay"
 	"github.com/scottbrown/relay/internal/acl"
+	"github.com/scottbrown/relay/internal/audit"
 	"github.com/scottbrown/relay/internal/circuitbreaker"
 	"github.com/scottbrown/relay/internal/config"
 	"github.com/scottbrown/relay/internal/dlq"
@@ -190,6 +191,33 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 		slog.Info("healthcheck server listening", "addr", cfg.HealthCheckAddr)
 	}
 
+	// Initialize audit logger if enabled
+	var auditCfg audit.Config
+	if cfg.Audit != nil && cfg.Audit.Enabled {
+		auditCfg = audit.Config{
+			Enabled:     true,
+			LogFile:     cfg.Audit.LogFile,
+			Format:      cfg.Audit.Format,
+			IncludeData: cfg.Audit.IncludeData,
+		}
+		// Set defaults if not specified
+		if auditCfg.LogFile == "" {
+			auditCfg.LogFile = "./audit.log"
+		}
+		if auditCfg.Format == "" {
+			auditCfg.Format = "json"
+		}
+	}
+	auditLogger, err := audit.New(auditCfg)
+	if err != nil {
+		slog.Error("failed to initialize audit logger", "error", err)
+		os.Exit(1)
+	}
+	defer auditLogger.Close()
+	if auditLogger.Enabled() {
+		slog.Info("audit logging enabled", "log_file", auditCfg.LogFile, "format", auditCfg.Format)
+	}
+
 	// Create servers for each listener
 	servers := make([]*server.Server, 0, len(cfg.Listeners))
 	storageManagers := make([]*storage.Manager, 0, len(cfg.Listeners))
@@ -304,7 +332,7 @@ func handleRootCmd(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		srv, err := server.New(serverCfg, aclList, storageMgr, fwd)
+		srv, err := server.New(serverCfg, aclList, storageMgr, fwd, auditLogger)
 		if err != nil {
 			slog.Error("failed to create server", "listener", listenerCfg.Name, "error", err)
 			os.Exit(1)

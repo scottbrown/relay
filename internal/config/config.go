@@ -150,6 +150,15 @@ type RetentionConfig struct {
 	CompressAge   int  `yaml:"compress_age_days"`      // Compress files older than N days (0 = disabled, default: 0)
 }
 
+// AuditConfig holds configuration for audit logging.
+// Audit logs provide a tamper-evident trail of security-relevant events for compliance.
+type AuditConfig struct {
+	Enabled     bool   `yaml:"enabled"`      // Enable/disable audit logging (default: false)
+	LogFile     string `yaml:"log_file"`     // Path to audit log file (default: ./audit.log)
+	Format      string `yaml:"format"`       // Output format: "json" or "cef" (default: json)
+	IncludeData bool   `yaml:"include_data"` // Include line data in audit (default: false, PII concern)
+}
+
 // ListenerConfig holds configuration for a single TCP listener.
 // Each listener can accept ZPA logs on a specific port and handle a specific log type.
 type ListenerConfig struct {
@@ -173,6 +182,7 @@ type Config struct {
 	HealthCheckEnabled bool             `yaml:"health_check_enabled"`
 	HealthCheckAddr    string           `yaml:"health_check_addr"`
 	Retention          *RetentionConfig `yaml:"retention"`
+	Audit              *AuditConfig     `yaml:"audit"`
 	Listeners          []ListenerConfig `yaml:"listeners"`
 }
 

@@ -40,7 +40,7 @@ func TestNew(t *testing.T) {
 	}
 	hecForwarder := forwarder.New(hecConfig)
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("New should succeed: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestStart_TCP(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestHandleConnection_StorageError(t *testing.T) {
 
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, workingStorage, hecForwarder)
+	server, err := New(config, aclList, workingStorage, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestStart_InvalidTLS(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestStart_InvalidAddress(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestStop_NoListener(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestHandleConnection_ValidJSON(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestHandleConnection_InvalidJSON(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestHandleConnection_LineTooLong(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestHandleConnection_MultipleLines(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestShutdown_NoActiveConnections(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestShutdown_WithActiveConnections(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestShutdown_Timeout(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestShutdown_DoubleCall(t *testing.T) {
 	defer storageManager.Close()
 	hecForwarder := forwarder.New(forwarder.Config{})
 
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}

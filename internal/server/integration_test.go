@@ -43,7 +43,7 @@ func TestServer_AcceptLoop_TCP(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestServer_AcceptLoop_TLS(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestServer_AcceptLoop_ACLRejection(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestServer_AcceptLoop_ConcurrentConnections(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestServer_AcceptLoop_InvalidJSONFiltering(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestServer_AcceptLoop_OversizedLineRejection(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestServer_AcceptLoop_ConnectionPersistence(t *testing.T) {
 	}
 
 	hecForwarder := forwarder.New(forwarder.Config{})
-	server, err := New(config, aclList, storageManager, hecForwarder)
+	server, err := New(config, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}

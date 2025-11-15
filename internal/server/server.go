@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/scottbrown/relay/internal/acl"
+	"github.com/scottbrown/relay/internal/audit"
 	"github.com/scottbrown/relay/internal/forwarder"
 	"github.com/scottbrown/relay/internal/metrics"
 	"github.com/scottbrown/relay/internal/processor"
@@ -42,6 +43,7 @@ type Server struct {
 	aclMu       sync.RWMutex // Protects ACL for config reloads
 	storage     *storage.Manager
 	forwarder   forwarder.Forwarder
+	auditLogger *audit.Logger
 	listener    net.Listener
 	connections sync.WaitGroup // Tracks active connections for graceful shutdown
 	shutdown    chan struct{}  // Signals when shutdown is initiated
@@ -66,14 +68,15 @@ func generateConnID() string {
 
 // New creates a new Server with the given configuration and dependencies.
 // It initialises the server but does not start listening.
-// The acl, storage, and forwarder parameters may be nil if those features are disabled.
-func New(config Config, aclList *acl.List, storageManager *storage.Manager, fwd forwarder.Forwarder) (*Server, error) {
+// The acl, storage, forwarder, and auditLogger parameters may be nil if those features are disabled.
+func New(config Config, aclList *acl.List, storageManager *storage.Manager, fwd forwarder.Forwarder, auditLog *audit.Logger) (*Server, error) {
 	return &Server{
-		config:    config,
-		acl:       aclList,
-		storage:   storageManager,
-		forwarder: fwd,
-		shutdown:  make(chan struct{}),
+		config:      config,
+		acl:         aclList,
+		storage:     storageManager,
+		forwarder:   fwd,
+		auditLogger: auditLog,
+		shutdown:    make(chan struct{}),
 	}, nil
 }
 
@@ -215,6 +218,21 @@ func (s *Server) acceptLoop() error {
 		if !allowed {
 			metrics.ConnectionsRejected.Add(1)
 			slog.Warn("connection denied by ACL", "client_ip", ra.IP.String())
+
+			// Audit: Connection rejected by ACL
+			if s.auditLogger != nil {
+				_ = s.auditLogger.Log(audit.Event{
+					EventType: audit.EventConnectionRejected,
+					Success:   false,
+					Actor:     ra.IP.String(),
+					Action:    "connect",
+					Result:    "rejected_by_acl",
+					Details: map[string]interface{}{
+						"reason": "client IP not in allowed CIDR ranges",
+					},
+				})
+			}
+
 			if err := conn.Close(); err != nil {
 				slog.Warn("failed to close denied connection", "error", err)
 			}
@@ -249,11 +267,38 @@ func (s *Server) handleConnection(conn net.Conn) {
 	connStartTime := time.Now()
 	slog.Info("connection accepted", "conn_id", connID, "client_addr", clientAddr)
 
+	// Audit: Connection accepted
+	if s.auditLogger != nil {
+		_ = s.auditLogger.Log(audit.Event{
+			EventType:    audit.EventConnectionAccepted,
+			Success:      true,
+			Actor:        clientAddr,
+			Action:       "connect",
+			Result:       "accepted",
+			ConnectionID: connID,
+		})
+	}
+
 	br := bufio.NewReader(conn)
 
 	defer func() {
 		duration := time.Since(connStartTime)
 		slog.Info("connection closed", "conn_id", connID, "client_addr", clientAddr, "duration", duration.String())
+
+		// Audit: Connection closed
+		if s.auditLogger != nil {
+			_ = s.auditLogger.Log(audit.Event{
+				EventType:    audit.EventConnectionClosed,
+				Success:      true,
+				Actor:        clientAddr,
+				Action:       "disconnect",
+				Result:       "closed",
+				ConnectionID: connID,
+				Details: map[string]interface{}{
+					"duration": duration.String(),
+				},
+			})
+		}
 	}()
 
 	for {

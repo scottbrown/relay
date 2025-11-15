@@ -48,7 +48,7 @@ func BenchmarkHandleConnection_Small(b *testing.B) {
 	srv, err := New(Config{
 		ListenAddr:   ":0",
 		MaxLineBytes: 1024 * 1024,
-	}, aclList, storageManager, hecForwarder)
+	}, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func BenchmarkHandleConnection_Medium(b *testing.B) {
 	srv, err := New(Config{
 		ListenAddr:   ":0",
 		MaxLineBytes: 1024 * 1024,
-	}, aclList, storageManager, hecForwarder)
+	}, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func BenchmarkHandleConnection_WithGzip(b *testing.B) {
 	srv, err := New(Config{
 		ListenAddr:   ":0",
 		MaxLineBytes: 1024 * 1024,
-	}, aclList, storageManager, hecForwarder)
+	}, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func BenchmarkHandleConnection_MixedValid(b *testing.B) {
 	srv, err := New(Config{
 		ListenAddr:   ":0",
 		MaxLineBytes: 1024 * 1024,
-	}, aclList, storageManager, hecForwarder)
+	}, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func BenchmarkHandleConnection_NoForwarding(b *testing.B) {
 	srv, err := New(Config{
 		ListenAddr:   ":0",
 		MaxLineBytes: 1024 * 1024,
-	}, aclList, storageManager, hecForwarder)
+	}, aclList, storageManager, hecForwarder, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
