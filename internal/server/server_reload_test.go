@@ -48,7 +48,7 @@ func TestServer_UpdateConfig_ACL(t *testing.T) {
 	srv, err := New(Config{
 		ListenAddr:   "127.0.0.1:0",
 		MaxLineBytes: 1024,
-	}, aclList, storage, mockFwd)
+	}, aclList, storage, mockFwd, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestServer_UpdateConfig_Forwarder(t *testing.T) {
 	srv, err := New(Config{
 		ListenAddr:   "127.0.0.1:0",
 		MaxLineBytes: 1024,
-	}, aclList, storage, mockFwd)
+	}, aclList, storage, mockFwd, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestServer_UpdateConfig_InvalidACL(t *testing.T) {
 	srv, err := New(Config{
 		ListenAddr:   "127.0.0.1:0",
 		MaxLineBytes: 1024,
-	}, aclList, storage, mockFwd)
+	}, aclList, storage, mockFwd, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestServer_UpdateConfig_EmptyACL(t *testing.T) {
 	srv, err := New(Config{
 		ListenAddr:   "127.0.0.1:0",
 		MaxLineBytes: 1024,
-	}, aclList, storage, mockFwd)
+	}, aclList, storage, mockFwd, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestServer_UpdateConfig_NilForwarder(t *testing.T) {
 	srv, err := New(Config{
 		ListenAddr:   "127.0.0.1:0",
 		MaxLineBytes: 1024,
-	}, aclList, storage, nil)
+	}, aclList, storage, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}

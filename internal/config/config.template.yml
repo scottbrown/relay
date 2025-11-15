@@ -64,6 +64,14 @@ health_check_addr: ":9099"
 #   check_interval_seconds: 3600    # How often to check for old files (default: 3600 = 1 hour)
 #   compress_age_days: 0            # Compress files older than N days, 0 = disabled (default: 0)
 
+# Audit logging configuration (disabled by default)
+# Provides tamper-evident trail of security-relevant events for compliance
+# audit:
+#   enabled: false                  # Enable/disable audit logging (default: false)
+#   log_file: "./audit.log"         # Path to audit log file (default: ./audit.log)
+#   format: "json"                  # Output format: "json" or "cef" (default: json)
+#   include_data: false             # Include line data in audit (default: false, PII concern)
+
 # Listener configurations (one per ZPA log type)
 listeners:
   # User Activity logs
