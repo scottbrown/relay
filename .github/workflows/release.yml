@@ -39,5 +39,14 @@ jobs:
           files: |
             bom.json
             .dist/*.tar.gz
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
