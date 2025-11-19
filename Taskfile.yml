@@ -225,6 +225,116 @@ tasks:
       - task: release-core
         vars: { GOOS: darwin, GOARCH: arm64 }
 
+  package-rpm-amd64:
+    desc: Build RPM package for x86_64 architecture
+    deps: [setup, build-linux-amd64]
+    preconditions:
+      - sh: command -v fpm
+        msg: "fpm is not installed. Install it with: gem install fpm"
+    cmds:
+      - |
+        fpm -s dir -t rpm \
+          --name {{.BINARY_NAME}} \
+          --version "{{.VERSION}}" \
+          --architecture x86_64 \
+          --description "ZPA Log Streaming Relay Binary" \
+          --url "https://{{.REPO}}" \
+          --license "Proprietary" \
+          --maintainer "relay@example.com" \
+          --depends systemd \
+          --rpm-os linux \
+          --after-install packaging/scripts/post-install.sh \
+          --before-remove packaging/scripts/pre-remove.sh \
+          --after-remove packaging/scripts/post-remove.sh \
+          --package {{.DIST_DIR}} \
+          {{.BUILD_DIR}}/linux-amd64/{{.BINARY_NAME}}=/usr/local/bin/{{.BINARY_NAME}} \
+          packaging/relay.service=/usr/lib/systemd/system/relay.service
+
+  package-rpm-arm64:
+    desc: Build RPM package for aarch64 architecture
+    deps: [setup, build-linux-arm64]
+    preconditions:
+      - sh: command -v fpm
+        msg: "fpm is not installed. Install it with: gem install fpm"
+    cmds:
+      - |
+        fpm -s dir -t rpm \
+          --name {{.BINARY_NAME}} \
+          --version "{{.VERSION}}" \
+          --architecture aarch64 \
+          --description "ZPA Log Streaming Relay Binary" \
+          --url "https://{{.REPO}}" \
+          --license "Proprietary" \
+          --maintainer "relay@example.com" \
+          --depends systemd \
+          --rpm-os linux \
+          --after-install packaging/scripts/post-install.sh \
+          --before-remove packaging/scripts/pre-remove.sh \
+          --after-remove packaging/scripts/post-remove.sh \
+          --package {{.DIST_DIR}} \
+          {{.BUILD_DIR}}/linux-arm64/{{.BINARY_NAME}}=/usr/local/bin/{{.BINARY_NAME}} \
+          packaging/relay.service=/usr/lib/systemd/system/relay.service
+
+  package-deb-amd64:
+    desc: Build DEB package for amd64 architecture
+    deps: [setup, build-linux-amd64]
+    preconditions:
+      - sh: command -v fpm
+        msg: "fpm is not installed. Install it with: gem install fpm"
+    cmds:
+      - |
+        fpm -s dir -t deb \
+          --name {{.BINARY_NAME}} \
+          --version "{{.VERSION}}" \
+          --architecture amd64 \
+          --description "ZPA Log Streaming Relay Binary" \
+          --url "https://{{.REPO}}" \
+          --license "Proprietary" \
+          --maintainer "relay@example.com" \
+          --depends systemd \
+          --after-install packaging/scripts/post-install.sh \
+          --before-remove packaging/scripts/pre-remove.sh \
+          --after-remove packaging/scripts/post-remove.sh \
+          --package {{.DIST_DIR}} \
+          {{.BUILD_DIR}}/linux-amd64/{{.BINARY_NAME}}=/usr/local/bin/{{.BINARY_NAME}} \
+          packaging/relay.service=/usr/lib/systemd/system/relay.service
+
+  package-deb-arm64:
+    desc: Build DEB package for arm64 architecture
+    deps: [setup, build-linux-arm64]
+    preconditions:
+      - sh: command -v fpm
+        msg: "fpm is not installed. Install it with: gem install fpm"
+    cmds:
+      - |
+        fpm -s dir -t deb \
+          --name {{.BINARY_NAME}} \
+          --version "{{.VERSION}}" \
+          --architecture arm64 \
+          --description "ZPA Log Streaming Relay Binary" \
+          --url "https://{{.REPO}}" \
+          --license "Proprietary" \
+          --maintainer "relay@example.com" \
+          --depends systemd \
+          --after-install packaging/scripts/post-install.sh \
+          --before-remove packaging/scripts/pre-remove.sh \
+          --after-remove packaging/scripts/post-remove.sh \
+          --package {{.DIST_DIR}} \
+          {{.BUILD_DIR}}/linux-arm64/{{.BINARY_NAME}}=/usr/local/bin/{{.BINARY_NAME}} \
+          packaging/relay.service=/usr/lib/systemd/system/relay.service
+
+  package-rpm:
+    desc: Build RPM packages for all architectures
+    deps: [package-rpm-amd64, package-rpm-arm64]
+
+  package-deb:
+    desc: Build DEB packages for all architectures
+    deps: [package-deb-amd64, package-deb-arm64]
+
+  package-all:
+    desc: Build all packages (RPM and DEB for all architectures)
+    deps: [package-rpm, package-deb]
+
   all:
     desc: Run all tasks (clean, build, test, coverage)
     cmds:

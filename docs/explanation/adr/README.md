@@ -34,6 +34,7 @@ We follow the format described by Michael Nygard in his article [Documenting Arc
 | [0014](0014-multi-target-hec.md) | Multi-Target HEC Support | Accepted |
 | [0015](0015-configuration-reload.md) | Configuration Reload via SIGHUP | Accepted |
 | [0016](0016-optional-log-retention.md) | Optional Log Retention with Built-in and External Support | Accepted |
+| [0017](0017-fpm-packaging.md) | FPM for Package Distribution | Accepted |
 
 ## Creating New ADRs
 

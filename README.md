@@ -61,6 +61,101 @@ sequenceDiagram
 
 ## Installation
 
+### Using Packages (Recommended)
+
+The relay service is available as RPM and DEB packages for easy installation and management on Linux systems. Packages include the relay binary, systemd service file, and automatic directory creation.
+
+#### RPM-based Systems (RHEL, CentOS, Amazon Linux, Fedora)
+
+```bash
+# Download and install from GitHub Releases
+sudo yum install -y https://github.com/scottbrown/relay/releases/download/v1.0.0/relay-1.0.0-1.x86_64.rpm
+
+# Or download first, then install
+curl -L -O https://github.com/scottbrown/relay/releases/download/v1.0.0/relay-1.0.0-1.x86_64.rpm
+sudo yum install -y ./relay-1.0.0-1.x86_64.rpm
+```
+
+#### DEB-based Systems (Debian, Ubuntu)
+
+```bash
+# Download and install
+curl -L -o relay.deb https://github.com/scottbrown/relay/releases/download/v1.0.0/relay_1.0.0_amd64.deb
+sudo apt install -y ./relay.deb
+```
+
+#### What's Included
+
+The package installation provides:
+- Binary installed to `/usr/local/bin/relay`
+- Systemd service file at `/usr/lib/systemd/system/relay.service`
+- Dedicated `relay` system user and group (no home directory)
+- DLQ directories created at `/var/spool/relay/dlq/{user-activity,user-status,app-connector-status,audit}` (owned by `relay:relay`)
+- Service enabled (but not started) to allow configuration first
+
+#### Post-Installation Steps
+
+1. Create your configuration file at `/etc/relay/config.yaml`:
+
+   ```bash
+   sudo mkdir -p /etc/relay
+   sudo relay template > /etc/relay/config.yaml
+   sudo chmod 600 /etc/relay/config.yaml
+   ```
+
+2. Edit the configuration with your Splunk HEC details:
+
+   ```bash
+   sudo vim /etc/relay/config.yaml
+   sudo chown relay:relay /etc/relay/config.yaml
+   ```
+
+3. Start the service:
+
+   ```bash
+   sudo systemctl start relay.service
+   sudo systemctl status relay.service
+   ```
+
+4. View logs:
+
+   ```bash
+   sudo journalctl -u relay.service -f
+   ```
+
+#### Package Architectures
+
+Packages are available for:
+- **x86_64/amd64**: Standard Intel/AMD processors
+- **aarch64/arm64**: ARM-based systems (AWS Graviton, Raspberry Pi 4+, etc.)
+
+#### Uninstalling
+
+```bash
+# RPM
+sudo yum remove relay
+
+# DEB
+sudo apt remove relay
+```
+
+Uninstalling will:
+- Stop and disable the service
+- Remove the binary and systemd service file
+- Clean up `/var/log/relay` and `/var/spool/relay` directories
+
+#### Testing Packages Before Release
+
+To test package builds without creating a release, use the manual workflow:
+
+1. Go to **Actions** tab in GitHub
+2. Select **Test Packaging** workflow
+3. Click **Run workflow**
+4. Optionally specify a test version (default: `0.0.0-test`)
+5. Download the built packages from the workflow artifacts
+
+This builds all 4 packages (2 RPM + 2 DEB) and uploads them as artifacts for testing.
+
 ### From Source
 
 ```bash
@@ -1102,25 +1197,47 @@ BenchmarkForward_Large_Gzip-8           100000   12345 ns/op   2048 B/op    8 al
 
 ## Deployment
 
-### Systemd Service
+### Using Packages (Recommended)
 
-Create `/etc/systemd/system/relay.service`:
+For production deployments, use the RPM or DEB packages which include:
+- Systemd service file pre-configured
+- Automatic directory creation
+- Proper permissions and security settings
+
+See the [Using Packages](#using-packages-recommended) section for installation instructions.
+
+### Manual Systemd Service
+
+If installing from source, create `/etc/systemd/system/relay.service`:
 
 ```ini
 [Unit]
 Description=Zscaler ZPA LSS Relay Service
 After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
 User=relay
-ExecStart=/usr/local/bin/relay -f /etc/relay/config.yml
-Restart=always
-RestartSec=5
+Group=relay
+ExecStart=/usr/local/bin/relay --config /etc/relay/config.yaml
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/relay /var/spool/relay
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+**Note:** When using packages, the systemd service file is already installed. This example is for manual installations from source.
 
 Enable and start:
 

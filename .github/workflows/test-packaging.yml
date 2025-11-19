@@ -1,27 +1,31 @@
 ---
-name: Release
+name: Test Packaging
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Test version number (e.g., 0.0.0-test)'
+        required: false
+        default: '0.0.0-test'
 
 jobs:
-  build:
+  test-packages:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     steps:
       - name: Checkout Source
         uses: actions/checkout@v5
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
+
       - name: Install Task
         uses: arduino/setup-task@v2
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
+
       - name: Compile all versions
         run: task release
 
@@ -32,29 +36,31 @@ jobs:
           sudo gem install --quiet fpm
 
       - name: Build packages
-        run: task package-all
+        run: |
+          export GITHUB_REF="refs/tags/v${{ github.event.inputs.version }}"
+          task package-all
+
+      - name: List built packages
+        run: |
+          echo "Built packages:"
+          ls -lh .dist/
+
+      - name: Upload packages as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-packages-${{ github.event.inputs.version }}
+          path: .dist/*
+          retention-days: 7
 
       - name: Generate SBOM
         uses: CycloneDX/gh-gomod-generate-sbom@v2
         with:
           version: v1
           args: mod -licenses -json -output bom.json
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            bom.json
-            .dist/*.tar.gz
-            .dist/*.rpm
-            .dist/*.deb
-          draft: true
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          name: sbom-${{ github.event.inputs.version }}
+          path: bom.json
+          retention-days: 7
