@@ -7,6 +7,7 @@ Reference documentation provides technical descriptions of the machinery and how
 ## Available Reference
 
 - [Configuration File Reference](configuration.md) - Complete reference for all configuration options
+- [Package Reference](packaging.md) - Technical details about RPM and DEB package structure, installation, and behaviour
 - [ZPA LSS Specifications](../../spec/) - Log format details and examples
 
 ## Coming Soon
