@@ -46,7 +46,7 @@ jobs:
           ls -lh .dist/
 
       - name: Upload packages as artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-packages-${{ github.event.inputs.version }}
           path: .dist/*
@@ -59,7 +59,7 @@ jobs:
           args: mod -licenses -json -output bom.json
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: sbom-${{ github.event.inputs.version }}
           path: bom.json
