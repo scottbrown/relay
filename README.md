@@ -55,7 +55,7 @@ sequenceDiagram
 
 ## Requirements
 
-- Go 1.21 or later
+- Go 1.27.4 or later
 - Access to a Splunk instance with HEC enabled
 - Network connectivity between Zscaler ZPA and the relay service
 
@@ -1080,7 +1080,7 @@ The metrics implementation uses only Go's standard library (`expvar`, `net/http`
 
 ### Prerequisites
 
-- Go 1.24.4+
+- Go 1.27.4+
 - Task runner (optional)
 
 ### Building
